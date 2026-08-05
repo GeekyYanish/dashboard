@@ -1,0 +1,494 @@
+@import "tailwindcss";
+
+/* ===========================================================================
+   REGISTRATION CONSOLE — design system source of truth
+   ---------------------------------------------------------------------------
+   Aesthetic: a precision instrument panel. Warm porcelain machined surfaces,
+   engraved labels, tactile controls. The chrome is strictly MONOCHROME —
+   graphite ink on porcelain — because in an ops console colour has a job:
+
+        COLOUR IS DATA. Hue is reserved for status and for status only.
+
+   A green pill always means money arrived. It never means "primary button".
+   One signal-orange accent exists for the live indicator, focus rings and the
+   brand mark, and is used nowhere else.
+
+   THE SURFACE LADDER (see src/components/neo/README.md):
+     L0   canvas          flat, never shadowed
+     L1   raised / inset   cards, tiles, buttons, toggles, chart frames
+     L1c  content plane    flat, inside an L1 card — tables, dense forms
+     L2   floating         modals, popovers, palette (real drop shadow)
+   A raised element may never contain another raised element.
+   =========================================================================== */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* --------------------------------------------------------------------------
+   Raw values. Swapped wholesale by [data-theme]; every token below is
+   referenced through @theme inline so utilities react to the swap live.
+   -------------------------------------------------------------------------- */
+:root,
+[data-theme="light"] {
+  /* Porcelain — deliberately warm. The ubiquitous #e0e5ec neumorphic template
+     is cold blue-grey; this reads as an ivory instrument panel instead. */
+  --neo-canvas: #eceae4;
+  --neo-base: #eceae4;
+  --neo-light: #fffefa; /* top-left highlight */
+  --neo-shadow: #c9c6bd; /* bottom-right shadow */
+  --neo-plane: #f6f5f1; /* L1c content plane */
+  --neo-plane-alt: #f1efea; /* zebra / hovered row */
+  --neo-hairline: #dcd9d1;
+  --neo-engrave: #d4d1c9;
+
+  --neo-ink: #20211d; /* 13.9:1 on canvas */
+  --neo-ink-soft: #4a4a43; /* 7.9:1 */
+  --neo-ink-muted: #6a6a61; /* 4.5:1 on canvas — the AA floor for body text */
+  --neo-ink-faint: #93938a; /* decorative only, never body text */
+
+  /* Signal — the one hot accent. Two values, because they have two jobs:
+     `--neo-signal` is CHROME (focus ring, active-nav marker, brand mark) and
+     only needs the 3:1 non-text threshold, so it stays vivid. `--st-signal` is
+     the INK used on a signal-toned pill, which is text and must clear 4.5:1
+     against `--neo-signal-soft`. Solved, not eyeballed. */
+  --neo-signal: #cf4d1c; /* 3.69:1 on canvas — non-text, passes */
+  --neo-signal-soft: #f0d8cc;
+  --st-signal: #a83e17;  /* 4.57:1 on signal-soft */
+
+  /* Status. Muted and earthy so they sit on porcelain rather than shout. */
+  --st-paid: #28744b; /* 4.57:1 on paid-bg */
+  --st-paid-bg: #dfe9e0;
+  --st-pending: #895f10; /* 4.57:1 on pending-bg */
+  --st-pending-bg: #efe6d3;
+  --st-failed: #b03838; /* 4.60:1 on failed-bg */
+  --st-failed-bg: #f0dcda;
+  --st-waitlist: #3a6595;
+  --st-waitlist-bg: #dde4ee;
+  --st-neutral: #65655d; /* 4.58:1 on neutral-bg */
+  --st-neutral-bg: #e5e3dd;
+  --st-info: #2a7073; /* 4.56:1 on info-bg */
+  --st-info-bg: #dbe8e7;
+
+  --neo-scrim: rgb(32 33 29 / 0.32);
+  --neo-float-shadow: 0 24px 60px -12px rgb(32 33 29 / 0.28),
+    0 4px 12px -2px rgb(32 33 29 / 0.14);
+
+  /* Chart series. NOT hand-picked — these are a validated categorical set,
+     assigned in fixed slot order and never cycled. Verified against the L1c
+     plane (#f6f5f1) for lightness band, chroma floor, adjacent-pair CVD
+     separation (worst ΔE 9.1) and normal-vision separation (worst ΔE 19.6).
+     Four slots sit under 3:1 on the light surface, so every chart using them
+     ships direct labels or a table view — that relief is not optional. */
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-3: #1baf7a;
+  --viz-4: #eda100;
+  --viz-5: #e87ba4;
+  --viz-6: #008300;
+  --viz-7: #4a3aa7;
+  --viz-8: #e34948;
+
+  /* Sequential ramp — capacity heatmaps, occupancy. One hue, ordered by
+     MAGNITUDE, not by physical lightness: step 1 always sits closest to the
+     surface and step 7 furthest from it. That means the ramp runs light→dark
+     here and dark→light in dark mode.
+
+     Each step carries its own `-ink`, solved for 4.5:1 against that step. A
+     label on a heat cell cannot infer its colour from the cell's *value* —
+     the ramp's direction flips between themes, which is exactly how a pale
+     cell ended up with white text on it. */
+  --seq-1: #cde2fb;
+  --seq-1-ink: #0b1f38; /* 12.52:1 */
+  --seq-2: #9ec5f4;
+  --seq-2-ink: #0b1f38; /* 9.27:1 */
+  --seq-3: #6da7ec;
+  --seq-3-ink: #0b1f38; /* 6.62:1 */
+  --seq-4: #3987e5;
+  --seq-4-ink: #0b1f38; /* 4.55:1 */
+  --seq-5: #256abf;
+  --seq-5-ink: #ffffff; /* 5.39:1 */
+  --seq-6: #184f95;
+  --seq-6-ink: #ffffff; /* 8.10:1 */
+  --seq-7: #0d366b;
+  --seq-7-ink: #ffffff; /* 11.95:1 */
+
+  --viz-grid: #ddd9d1;
+  --viz-axis: #93938a;
+}
+
+[data-theme="dark"] {
+  /* Graphite. Dark neumorphism needs a *softer* highlight than light does,
+     or the extrusion reads as moulded plastic rather than machined metal. */
+  --neo-canvas: #26262a;
+  --neo-base: #26262a;
+  --neo-light: #313137;
+  --neo-shadow: #17171a;
+  --neo-plane: #1f1f23;
+  --neo-plane-alt: #24242a;
+  --neo-hairline: #38383f;
+  --neo-engrave: #34343a;
+
+  --neo-ink: #ecebe6; /* 12.6:1 on canvas */
+  --neo-ink-soft: #c3c2bb;
+  --neo-ink-muted: #96958d; /* 5.1:1 */
+  --neo-ink-faint: #6d6c66;
+
+  --neo-signal: #f2703c;
+  --neo-signal-soft: #402418; /* darkened so signal ink clears 4.5:1 */
+  --st-signal: #f2703c;
+
+  --st-paid: #57b581;
+  --st-paid-bg: #1e2f26;
+  --st-pending: #d9a648;
+  --st-pending-bg: #332a18;
+  --st-failed: #e2696a;
+  --st-failed-bg: #34211f;
+  --st-waitlist: #6e9dd6;
+  --st-waitlist-bg: #1d2735;
+  --st-neutral: #96958d;
+  --st-neutral-bg: #2a2a2e;
+  --st-info: #56a9ac;
+  --st-info-bg: #1a2b2c;
+
+  --neo-scrim: rgb(8 8 10 / 0.62);
+  --neo-float-shadow: 0 24px 60px -12px rgb(0 0 0 / 0.7),
+    0 4px 12px -2px rgb(0 0 0 / 0.5);
+
+  /* Dark steps are SELECTED for the dark surface, not an automatic flip of the
+     light values. Same eight hues, re-stepped and re-validated against the dark
+     plane (#1f1f23): worst adjacent CVD ΔE 8.4, normal-vision ΔE 19.3, all
+     slots ≥ 3:1. */
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --viz-3: #199e70;
+  --viz-4: #c98500;
+  --viz-5: #d55181;
+  --viz-6: #008300;
+  --viz-7: #9085e9;
+  --viz-8: #e66767;
+
+  /* Same magnitude ordering: step 1 nearest the dark surface, step 7 furthest.
+     Inks re-solved for these steps. */
+  --seq-1: #0d366b;
+  --seq-1-ink: #ffffff; /* 11.95:1 */
+  --seq-2: #184f95;
+  --seq-2-ink: #ffffff; /* 8.10:1 */
+  --seq-3: #256abf;
+  --seq-3-ink: #ffffff; /* 5.39:1 */
+  --seq-4: #3987e5;
+  --seq-4-ink: #0b1f38; /* 4.55:1 */
+  --seq-5: #6da7ec;
+  --seq-5-ink: #0b1f38; /* 6.62:1 */
+  --seq-6: #9ec5f4;
+  --seq-6-ink: #0b1f38; /* 9.27:1 */
+  --seq-7: #cde2fb;
+  --seq-7-ink: #0b1f38; /* 12.52:1 */
+
+  --viz-grid: #34343a;
+  --viz-axis: #6d6c66;
+}
+
+@theme inline {
+  --color-canvas: var(--neo-canvas);
+  --color-base: var(--neo-base);
+  --color-light: var(--neo-light);
+  --color-shade: var(--neo-shadow);
+  --color-plane: var(--neo-plane);
+  --color-plane-alt: var(--neo-plane-alt);
+  --color-hairline: var(--neo-hairline);
+  --color-engrave: var(--neo-engrave);
+
+  --color-ink: var(--neo-ink);
+  --color-ink-soft: var(--neo-ink-soft);
+  --color-ink-muted: var(--neo-ink-muted);
+  --color-ink-faint: var(--neo-ink-faint);
+
+  --color-signal: var(--neo-signal);
+  --color-signal-soft: var(--neo-signal-soft);
+  --color-signal-ink: var(--st-signal);
+
+  --color-paid: var(--st-paid);
+  --color-paid-bg: var(--st-paid-bg);
+  --color-pending: var(--st-pending);
+  --color-pending-bg: var(--st-pending-bg);
+  --color-failed: var(--st-failed);
+  --color-failed-bg: var(--st-failed-bg);
+  --color-waitlist: var(--st-waitlist);
+  --color-waitlist-bg: var(--st-waitlist-bg);
+  --color-neutral: var(--st-neutral);
+  --color-neutral-bg: var(--st-neutral-bg);
+  --color-info: var(--st-info);
+  --color-info-bg: var(--st-info-bg);
+
+  --color-viz-1: var(--viz-1);
+  --color-viz-2: var(--viz-2);
+  --color-viz-3: var(--viz-3);
+  --color-viz-4: var(--viz-4);
+  --color-viz-5: var(--viz-5);
+  --color-viz-6: var(--viz-6);
+  --color-viz-7: var(--viz-7);
+  --color-viz-8: var(--viz-8);
+  --color-viz-grid: var(--viz-grid);
+  --color-viz-axis: var(--viz-axis);
+
+  --font-display: var(--font-bricolage), ui-sans-serif, sans-serif;
+  --font-sans: var(--font-archivo), ui-sans-serif, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+
+  --radius-neo-sm: 10px;
+  --radius-neo: 14px;
+  --radius-neo-lg: 20px;
+}
+
+/* --------------------------------------------------------------------------
+   Depth utilities. No component hand-writes a box-shadow — if a surface needs
+   depth it uses one of these, so the whole app re-tunes from this one block.
+   -------------------------------------------------------------------------- */
+
+@utility neo-raised-sm {
+  background: var(--neo-base);
+  box-shadow: 3px 3px 7px var(--neo-shadow), -3px -3px 7px var(--neo-light);
+}
+@utility neo-raised {
+  background: var(--neo-base);
+  box-shadow: 6px 6px 14px var(--neo-shadow), -6px -6px 14px var(--neo-light);
+}
+@utility neo-raised-lg {
+  background: var(--neo-base);
+  box-shadow: 11px 11px 26px var(--neo-shadow), -9px -9px 22px var(--neo-light);
+}
+@utility neo-inset-sm {
+  background: var(--neo-base);
+  box-shadow: inset 2px 2px 5px var(--neo-shadow),
+    inset -2px -2px 5px var(--neo-light);
+}
+@utility neo-inset {
+  background: var(--neo-base);
+  box-shadow: inset 5px 5px 11px var(--neo-shadow),
+    inset -4px -4px 9px var(--neo-light);
+}
+@utility neo-pressed {
+  background: var(--neo-base);
+  box-shadow: inset 4px 4px 9px var(--neo-shadow),
+    inset -3px -3px 7px var(--neo-light);
+}
+/* L1c — the pressure valve. Flat, no shadow, full text contrast. This is what
+   lets a 3,100-row table stay readable AND paint fast (zero shadows per row). */
+@utility neo-plane {
+  background: var(--neo-plane);
+}
+@utility neo-float {
+  background: var(--neo-base);
+  box-shadow: var(--neo-float-shadow);
+}
+@utility neo-flat {
+  background: var(--neo-base);
+  box-shadow: none;
+}
+
+/* Engraved label — the small-caps rule above a control group, like silkscreen
+   on a hardware panel. */
+@utility engraved {
+  color: var(--neo-ink-faint);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 var(--neo-light);
+}
+
+/* Tabular figures — money and counts must not shimmy when they tick. */
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* --------------------------------------------------------------------------
+   Base
+   -------------------------------------------------------------------------- */
+@layer base {
+  html {
+    background: var(--neo-canvas);
+    color-scheme: light;
+  }
+  html[data-theme="dark"] {
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--neo-canvas);
+    color: var(--neo-ink);
+    font-family: var(--font-archivo), ui-sans-serif, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-bricolage), ui-sans-serif, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
+  /* A soft shadow is NOT a focus indicator. Everything focusable gets a real
+     ring, in both themes, no exceptions. */
+  :focus-visible {
+    outline: 2px solid var(--neo-signal);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: var(--neo-signal);
+    color: #fff;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--neo-shadow) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--neo-shadow);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 99px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--neo-ink-faint);
+    background-clip: content-box;
+  }
+}
+
+[data-theme="dark"] .engraved {
+  text-shadow: 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+/* --------------------------------------------------------------------------
+   Density. 3,100 rows need compact; the desk kiosk needs the opposite.
+   -------------------------------------------------------------------------- */
+:root {
+  --row-h: 44px;
+  --cell-px: 14px;
+  --card-p: 20px;
+}
+[data-density="compact"] {
+  --row-h: 34px;
+  --cell-px: 10px;
+  --card-p: 16px;
+}
+[data-density="roomy"] {
+  --row-h: 56px;
+  --cell-px: 18px;
+  --card-p: 26px;
+}
+
+/* --------------------------------------------------------------------------
+   Motion
+   -------------------------------------------------------------------------- */
+@keyframes neo-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+@keyframes neo-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+}
+@keyframes neo-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes neo-sweep {
+  from {
+    stroke-dashoffset: var(--dash, 1000);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@utility shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--neo-base) 8%,
+    var(--neo-plane) 20%,
+    var(--neo-base) 34%
+  );
+  background-size: 200% 100%;
+  animation: neo-shimmer 1.6s linear infinite;
+}
+@utility rise {
+  animation: neo-rise 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@utility live-dot {
+  animation: neo-pulse 1.9s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+[data-reduce-motion="true"] *,
+[data-reduce-motion="true"] *::before,
+[data-reduce-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* --------------------------------------------------------------------------
+   Print — badges, receipts and reports must come out on paper cleanly. The
+   neumorphic layer is ink-expensive and meaningless in print, so it is
+   flattened away entirely.
+   -------------------------------------------------------------------------- */
+@media print {
+  :root,
+  [data-theme="dark"] {
+    --neo-canvas: #fff;
+    --neo-base: #fff;
+    --neo-plane: #fff;
+    --neo-plane-alt: #fff;
+    --neo-ink: #000;
+    --neo-ink-soft: #222;
+    --neo-ink-muted: #444;
+    --neo-hairline: #999;
+  }
+  [data-print-hide] {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  @page {
+    margin: 10mm;
+  }
+}

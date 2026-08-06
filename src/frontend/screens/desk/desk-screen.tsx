@@ -39,7 +39,7 @@ import {
 import { BadgeSheet } from "./badge-sheet";
 import { useAsync, useDebounced } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
-import { useOfflineQueue, useSimulatedOffline, type QueuedOp } from "@/frontend/hooks/use-offline-queue";
+import { useOfflineQueue, type QueuedOp } from "@/frontend/hooks/use-offline-queue";
 import { usePrefs } from "@/frontend/prefs";
 import { getRepo } from "@/lib/data";
 import { isDataError, type Participant } from "@/lib/data/types";
@@ -65,19 +65,17 @@ export function DeskScreen() {
   const [payOpen, setPayOpen] = useState(false);
   const [kitOpen, setKitOpen] = useState(false);
   const [printFor, setPrintFor] = useState<Participant | null>(null);
-  const { simOffline, setSimOffline } = useSimulatedOffline();
 
   const shift = useAsync(() => getRepo().desk.currentShift(), []);
   const tokens = useAsync(() => getRepo().desk.tokens(), []);
 
   // Offline queue — replays whatever was captured while the network was down.
   const flushOp = useCallback(async (op: QueuedOp) => {
-    if (simOffline) throw new Error("offline");
     if (op.kind === "checkin") {
       const p = op.payload as { participantId: string };
       await getRepo().attendance.checkIn({ participantId: p.participantId, method: "manual" });
     }
-  }, [simOffline]);
+  }, []);
   const offline = useOfflineQueue(flushOp);
 
   const results = useAsync(
@@ -134,7 +132,7 @@ export function DeskScreen() {
 
   const checkIn = async () => {
     if (!selected) return;
-    if (simOffline) {
+    if (!offline.online) {
       offline.enqueue("checkin", `Check-in ${selected.fullName}`, { participantId: selected.id });
       toast.warning("Queued offline", "Will sync automatically when the network returns.");
       return;
@@ -180,17 +178,21 @@ export function DeskScreen() {
             </span>
           ) : null}
 
-          <button
-            onClick={() => setSimOffline((v) => !v)}
+          {/* Real connectivity, from navigator.onLine — not a demo switch. */}
+          <span
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[0.78rem] font-semibold transition-colors",
-              simOffline ? "bg-failed-bg text-failed" : "bg-paid-bg text-paid",
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[0.78rem] font-semibold",
+              offline.online ? "bg-paid-bg text-paid" : "bg-failed-bg text-failed",
             )}
-            title="Simulate a network drop to see the offline path"
+            title={
+              offline.online
+                ? "Connected — writes go straight through"
+                : "Offline — writes are queued and will sync automatically"
+            }
           >
-            {simOffline ? <WifiOff className="size-3.5" /> : <Wifi className="size-3.5" />}
-            {simOffline ? "Offline" : "Online"}
-          </button>
+            {offline.online ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />}
+            {offline.online ? "Online" : "Offline"}
+          </span>
 
           <div className="neo-inset-sm hidden items-baseline gap-2 rounded-neo px-3 py-1.5 sm:flex">
             <span className="engraved !text-[0.58rem]">Queue</span>

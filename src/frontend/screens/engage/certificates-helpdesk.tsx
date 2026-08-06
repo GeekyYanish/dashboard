@@ -226,7 +226,7 @@ export function CertificatesScreen() {
               <EmptyState
                 icon={<Award />}
                 title="No certificates issued yet"
-                hint="Bulk-issue after an event's attendance is recorded."
+                hint="Issuance is gated on attendance, so nothing can be issued until the fest has run. Bulk-issue once an event's attendance is recorded."
                 action={
                   <NeoButton variant="primary" icon={<Plus />} onClick={() => setIssueOpen(true)}>
                     Bulk issue

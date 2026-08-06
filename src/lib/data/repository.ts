@@ -14,6 +14,8 @@
  * eventual server action returns. Catch on `code`, never on message.
  */
 
+import type { StaffRoleId } from "../fest.config";
+import type { Session } from "../auth/session";
 import type {
   AccommodationRequest,
   Announcement,
@@ -52,6 +54,7 @@ import type {
 } from "./types";
 
 export interface Repository {
+  auth: AuthRepo;
   overview: OverviewRepo;
   participants: ParticipantRepo;
   registrations: RegistrationRepo;
@@ -76,11 +79,34 @@ export interface Repository {
   admin: AdminRepo;
 }
 
-/** Who is acting. In the mock this is a picker; later it comes from the session. */
+/** Who is acting. Derived from the signed-in session — never settable. */
 export interface Actor {
   id: string;
   name: string;
-  role: string;
+  role: StaffRoleId;
+}
+
+export type Unsubscribe = () => void;
+
+/**
+ * Authentication.
+ *
+ * The contract is shaped so a server implementation is a drop-in: `signIn`
+ * would set an httpOnly cookie instead of writing localStorage, and `session()`
+ * would read it back. No screen code changes.
+ *
+ * See src/lib/auth/session.ts for why the current implementation is not a
+ * security boundary.
+ */
+export interface AuthRepo {
+  /** Throws INVALID_CREDENTIALS, ACCOUNT_DISABLED or ACCOUNT_LOCKED. */
+  signIn(email: string, password: string): Promise<Session>;
+  signOut(): Promise<void>;
+  /** null once expired — callers must treat that as signed out. */
+  session(): Promise<Session | null>;
+  /** Throws PASSWORD_TOO_WEAK, or INVALID_CREDENTIALS if `current` is wrong. */
+  changePassword(current: string, next: string): Promise<void>;
+  onAuthStateChange(cb: (s: Session | null) => void): Unsubscribe;
 }
 
 export interface OverviewRepo {
@@ -411,9 +437,13 @@ export interface SavedViewRepo {
 }
 
 export interface AdminRepo {
-  /** Who the console is acting as. Swapped by the role picker in settings. */
-  actor(): Promise<Actor>;
-  setActor(staffId: string): Promise<Actor>;
+  /**
+   * Who the console is acting as — derived from the session.
+   *
+   * There is deliberately no `setActor`. It existed before login, and with
+   * real accounts it is a one-click privilege escalation.
+   */
+  actor(): Promise<Actor | null>;
   /** Wipes and reseeds — used by /dev/data-test so runs are deterministic. */
   reset(seed?: number): Promise<void>;
   /** Advances the simulated clock so the dashboard visibly breathes. */

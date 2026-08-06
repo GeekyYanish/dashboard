@@ -6,20 +6,48 @@
  * from here.
  */
 
-export const FEST = {
+export interface FestDay {
+  key: string;
+  label: string;
+  date: string;
+}
+
+/**
+ * Fest days are DERIVED from startsAt/endsAt, never hand-listed.
+ *
+ * They used to be a literal array, and it drifted: the fest moved to October
+ * while `days` still said February, so everything day-keyed — attendance, meal
+ * coupons, hostel nights, desk shifts — pointed at dates the fest no longer
+ * had. Deriving them makes that class of bug impossible.
+ *
+ * Dates are taken from the ISO string's date component rather than via local
+ * `Date` methods, so a machine outside IST cannot shift a day boundary.
+ */
+function deriveDays(startsAt: string, endsAt: string): FestDay[] {
+  const dayMs = 86_400_000;
+  const at = (iso: string) => {
+    const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  const out: FestDay[] = [];
+  const end = at(endsAt);
+  for (let t = at(startsAt), i = 1; t <= end; t += dayMs, i++) {
+    out.push({
+      key: `d${i}`,
+      label: `Day ${i}`,
+      date: new Date(t).toISOString().slice(0, 10),
+    });
+  }
+  return out;
+}
+
+const FEST_BASE = {
   name: "GATEWAYS",
   edition: "'26",
   fullName: "Gateways '26",
   tagline: "National Inter-Collegiate Tech Fest",
   host: "CHRIST (Deemed to be University)",
   city: "Bangalore, Karnataka",
-
-  /** Fest days. Everything day-scoped (food coupons, attendance) keys off these. */
-  days: [
-    { key: "d1", label: "Day 1", date: "2026-02-12" },
-    { key: "d2", label: "Day 2", date: "2026-02-13" },
-    { key: "d3", label: "Day 3", date: "2026-02-14" },
-  ],
 
   startsAt: "2026-10-08T09:00:00+05:30",
   endsAt: "2026-10-09T21:00:00+05:30",
@@ -53,6 +81,12 @@ export const FEST = {
     },
   },
 } as const;
+
+export const FEST = {
+  ...FEST_BASE,
+  /** Day-scoped data (attendance, meal coupons, hostel nights) keys off these. */
+  days: deriveDays(FEST_BASE.startsAt, FEST_BASE.endsAt),
+};
 
 // ---------------------------------------------------------------------------
 // Registrant categories — each carries its own fee basis, required documents

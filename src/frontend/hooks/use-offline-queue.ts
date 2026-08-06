@@ -96,9 +96,3 @@ export function useOfflineQueue(flush: (op: QueuedOp) => Promise<void>) {
 
   return { queue, online, flushing, enqueue, flushAll, pending: queue.length };
 }
-
-/** Simulated connectivity toggle, so the offline path is demonstrable. */
-export function useSimulatedOffline() {
-  const [simOffline, setSimOffline] = useState(false);
-  return { simOffline, setSimOffline };
-}

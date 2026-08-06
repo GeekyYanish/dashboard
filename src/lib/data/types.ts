@@ -486,6 +486,20 @@ export interface StaffMember {
   role: StaffRoleId;
   isActive: boolean;
   joinedAt: string;
+
+  /**
+   * Credentials. The hash is PBKDF2-SHA256 with a per-user salt — see
+   * src/lib/auth/crypto.ts. Plaintext is never stored, even in a demo build:
+   * people reuse passwords, and a localStorage dump would hand them over.
+   */
+  passwordHash: string;
+  passwordSalt: string;
+  /** Seeded accounts start true — a documented default is a way in, not a way to operate. */
+  mustChangePassword: boolean;
+  lastLoginAt: string | null;
+  /** Reset on success; drives the sign-in lockout. */
+  failedAttempts: number;
+  lockedUntil: string | null;
 }
 
 export interface AuditEvent {
@@ -580,6 +594,12 @@ export interface AttentionItem {
 // ---------------------------------------------------------------------------
 
 export type DataErrorCode =
+  | "NOT_AUTHENTICATED"
+  | "INVALID_CREDENTIALS"
+  | "ACCOUNT_DISABLED"
+  | "ACCOUNT_LOCKED"
+  | "PASSWORD_TOO_WEAK"
+  | "MUST_CHANGE_PASSWORD"
   | "NOT_FOUND"
   | "VALIDATION_FAILED"
   | "ALREADY_REGISTERED"

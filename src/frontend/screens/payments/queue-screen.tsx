@@ -27,6 +27,7 @@ import {
   NeoTextarea,
   toast,
 } from "@/frontend/components/neo";
+import { GatedButton } from "@/frontend/components/gated";
 import { useAsync } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
@@ -475,15 +476,24 @@ function ReviewPane({
           Verifying issues an invoice serial and confirms the linked registrations.
         </span>
         <div className="flex gap-2">
-          <NeoButton size="sm" variant="secondary" icon={<RotateCcw />} loading={busy} onClick={onResubmit}>
+          <GatedButton
+            capability="payments.verify"
+            size="sm" variant="secondary" icon={<RotateCcw />} loading={busy} onClick={onResubmit}
+          >
             Re-upload
-          </NeoButton>
-          <NeoButton size="sm" variant="danger" icon={<X />} loading={busy} onClick={onReject}>
+          </GatedButton>
+          <GatedButton
+            capability="payments.verify"
+            size="sm" variant="danger" icon={<X />} loading={busy} onClick={onReject}
+          >
             Reject
-          </NeoButton>
-          <NeoButton size="sm" variant="primary" icon={<Check />} loading={busy} onClick={onApprove}>
+          </GatedButton>
+          <GatedButton
+            capability="payments.verify"
+            size="sm" variant="primary" icon={<Check />} loading={busy} onClick={onApprove}
+          >
             Verify
-          </NeoButton>
+          </GatedButton>
         </div>
       </NeoCard.Footer>
     </NeoCard>

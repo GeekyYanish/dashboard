@@ -23,9 +23,14 @@ import {
   FEST,
   HOSTEL_BLOCKS,
   MEALS,
+  STAFF_ROLES,
   TRACKS,
 } from "../../fest.config";
-import { cheapHash, SEED_NOW } from "./seed";
+import { cheapHash } from "./seed";
+import { can, rolesFor, type Capability } from "../../auth/permissions";
+import { checkPassword, hashPassword, verifyPassword } from "../../auth/crypto";
+import * as sessionStore from "../../auth/session";
+import type { Session } from "../../auth/session";
 import { getStore, resetStore, type Store } from "./store";
 import { DataError } from "../types";
 import type {
@@ -75,12 +80,15 @@ import type {
 } from "../repository";
 
 /**
- * The world's "now". Frozen to a week before the fest so the seeded state is
- * stable and meaningful — deep payment queue, half-allotted hostels, documents
- * still arriving. `tick()` nudges it forward so the dashboard breathes.
+ * The world's "now" — real time.
+ *
+ * The previous build froze this to keep the demo stable. With the dataset cut
+ * to a small worked example dated relative to the fest, a frozen clock only
+ * made timestamps drift out of step with reality. `tick()` still exists for the
+ * war-room refresh, but no longer distorts time.
  */
 let clockOffsetMs = 0;
-const now = () => new Date(SEED_NOW.getTime() + clockOffsetMs);
+const now = () => new Date(Date.now() + clockOffsetMs);
 const nowIso = () => now().toISOString();
 
 const uid = (() => {
@@ -108,6 +116,54 @@ export class MockRepository implements Repository {
     return this.s.data;
   }
 
+  // =========================================================================
+  // Identity & authorisation
+  //
+  // `assertCan` is the ACTUAL enforcement. The UI reads the same capability map
+  // to decide what to disable, but disabling a button is a courtesy — this is
+  // the check that has to hold. Before this existed the settings matrix
+  // advertised ten permissions and the repository enforced two.
+  //
+  // When a server lands, this method moves verbatim into a server action and
+  // every call site below stays exactly where it is.
+  // =========================================================================
+
+  /** The signed-in staff record, or null. */
+  private currentStaff(): StaffMember | null {
+    const s = sessionStore.current();
+    if (!s) return null;
+    return this.d.staff.find((x) => x.id === s.staffId) ?? null;
+  }
+
+  /** Throws unless someone is signed in. Returns the record so callers can use it. */
+  private requireStaff(): StaffMember {
+    const staff = this.currentStaff();
+    if (!staff) throw new DataError("NOT_AUTHENTICATED", "Sign in to continue");
+    if (!staff.isActive) throw new DataError("ACCOUNT_DISABLED", "This account is disabled");
+    return staff;
+  }
+
+  /**
+   * The authorisation gate. Every mutating method calls this first.
+   *
+   * The message names the capability AND the roles that hold it, so a blocked
+   * operator can ask for the right thing instead of filing "it doesn't work".
+   */
+  private assertCan(cap: Capability): StaffMember {
+    const staff = this.requireStaff();
+    if (!can(staff.role, cap)) {
+      const allowed = rolesFor(cap)
+        .map((r) => STAFF_ROLES.find((x) => x.id === r)?.label ?? r)
+        .join(" or ");
+      throw new DataError(
+        "FORBIDDEN",
+        `Your role cannot do this — "${cap}" requires ${allowed}`,
+        cap,
+      );
+    }
+    return staff;
+  }
+
   // -------------------------------------------------------------------------
   // Audit — every mutation goes through here. No silent writes.
   // -------------------------------------------------------------------------
@@ -120,11 +176,13 @@ export class MockRepository implements Repository {
     after: Record<string, unknown> | null,
     note?: string,
   ) {
-    const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
+    // Tolerates a missing session so sign-out and system writes can still be
+    // recorded — an unattributed audit line is far better than a lost one.
+    const actor = this.currentStaff();
     const ev: AuditEvent = {
       id: uid("aud"),
-      actorId: actor.id,
-      actorName: actor.name,
+      actorId: actor?.id ?? "system",
+      actorName: actor?.name ?? "System",
       action,
       entity,
       entityId,
@@ -253,6 +311,89 @@ export class MockRepository implements Repository {
     const dob = new Date(p.dateOfBirth).getTime();
     return (fest - dob) / (365.25 * 86400000) < 18;
   }
+
+  // =========================================================================
+  // auth
+  // =========================================================================
+
+  /** Five failures locks the account for a minute. */
+  private static readonly MAX_ATTEMPTS = 5;
+  private static readonly LOCKOUT_MS = 60_000;
+
+  auth = {
+    signIn: async (email: string, password: string): Promise<Session> => {
+      const staff = this.d.staff.find(
+        (x) => x.email.toLowerCase() === email.trim().toLowerCase(),
+      );
+
+      // Same error whether the account is missing or the password is wrong —
+      // distinguishing them tells an attacker which emails are real.
+      if (!staff) throw new DataError("INVALID_CREDENTIALS", "Email or password is incorrect");
+      if (!staff.isActive) throw new DataError("ACCOUNT_DISABLED", "This account is disabled");
+
+      if (staff.lockedUntil && new Date(staff.lockedUntil) > now()) {
+        const secs = Math.ceil((new Date(staff.lockedUntil).getTime() - now().getTime()) / 1000);
+        throw new DataError("ACCOUNT_LOCKED", `Too many attempts — try again in ${secs}s`);
+      }
+
+      const ok = await verifyPassword(password, staff.passwordHash, staff.passwordSalt);
+      if (!ok) {
+        staff.failedAttempts += 1;
+        if (staff.failedAttempts >= MockRepository.MAX_ATTEMPTS) {
+          staff.lockedUntil = new Date(now().getTime() + MockRepository.LOCKOUT_MS).toISOString();
+          staff.failedAttempts = 0;
+        }
+        this.save("staff", staff);
+        throw new DataError("INVALID_CREDENTIALS", "Email or password is incorrect");
+      }
+
+      staff.failedAttempts = 0;
+      staff.lockedUntil = null;
+      staff.lastLoginAt = nowIso();
+      this.save("staff", staff);
+
+      const session = sessionStore.mint({
+        staffId: staff.id,
+        name: staff.name,
+        email: staff.email,
+        role: staff.role,
+        mustChangePassword: staff.mustChangePassword,
+      });
+      this.log("auth.signed_in", "staff", staff.id, null, { role: staff.role });
+      return session;
+    },
+
+    signOut: async () => {
+      const staff = this.currentStaff();
+      if (staff) this.log("auth.signed_out", "staff", staff.id, null, null);
+      sessionStore.clear();
+    },
+
+    session: async () => sessionStore.current(),
+
+    changePassword: async (currentPw: string, nextPw: string) => {
+      const staff = this.requireStaff();
+
+      const ok = await verifyPassword(currentPw, staff.passwordHash, staff.passwordSalt);
+      if (!ok) throw new DataError("INVALID_CREDENTIALS", "Your current password is incorrect");
+
+      const check = checkPassword(nextPw, staff.email);
+      if (!check.ok) throw new DataError("PASSWORD_TOO_WEAK", check.problems[0]);
+
+      // A fresh salt on every change, so an old leaked hash tells you nothing
+      // about the new password.
+      const { hash, salt } = await hashPassword(nextPw);
+      staff.passwordHash = hash;
+      staff.passwordSalt = salt;
+      staff.mustChangePassword = false;
+      this.save("staff", staff);
+
+      sessionStore.patch({ mustChangePassword: false });
+      this.log("auth.password_changed", "staff", staff.id, null, null);
+    },
+
+    onAuthStateChange: (cb: (s: Session | null) => void) => sessionStore.subscribe(cb),
+  };
 
   // =========================================================================
   // overview
@@ -606,6 +747,7 @@ export class MockRepository implements Repository {
     },
 
     merge: async (keepId: string, mergeId: string) => {
+      this.assertCan("registrations.write");
       const keep = this.d.participants.find((p) => p.id === keepId);
       const drop = this.d.participants.find((p) => p.id === mergeId);
       if (!keep || !drop) throw new DataError("NOT_FOUND");
@@ -616,12 +758,14 @@ export class MockRepository implements Repository {
         const collision = this.d.registrations.some(
           (x) => x.participantId === keepId && x.eventId === r.eventId,
         );
+        // Always re-point, even when cancelling: leaving a row attached to a
+        // participant that is about to be deleted is a dangling reference, and
+        // it made the merged person's history disappear from their own record.
+        r.participantId = keepId;
         if (collision) {
           r.status = "cancelled";
           r.cancelReason = "duplicate";
           r.cancelledAt = nowIso();
-        } else {
-          r.participantId = keepId;
         }
         this.save("registrations", r);
       }
@@ -659,6 +803,7 @@ export class MockRepository implements Repository {
     },
 
     erase: async (id: string) => {
+      this.assertCan("participants.erase");
       const p = this.d.participants.find((x) => x.id === id);
       if (!p) throw new DataError("NOT_FOUND");
       // Financial records are retained but de-identified — an erasure request
@@ -752,6 +897,7 @@ export class MockRepository implements Repository {
       source?: "online" | "on_spot" | "csv_import";
     }) => {
       const ev = this.d.events.find((e) => e.id === input.eventId);
+      this.assertCan("registrations.write");
       if (!ev) throw new DataError("NOT_FOUND", "Event not found");
 
       // Unique (eventId, participantId) — a live registration blocks a second.
@@ -803,6 +949,7 @@ export class MockRepository implements Repository {
     },
 
     setStatus: async (id: string, status: RegistrationStatus, reason?: string) => {
+      this.assertCan("registrations.write");
       const rec = this.d.registrations.find((r) => r.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
       const before = { status: rec.status };
@@ -819,6 +966,7 @@ export class MockRepository implements Repository {
     },
 
     cancel: async (id: string, reason: string) => {
+      this.assertCan("registrations.cancel");
       const rec = this.d.registrations.find((r) => r.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
       const wasLive = rec.status === "confirmed" || rec.status === "pending";
@@ -1037,6 +1185,7 @@ export class MockRepository implements Repository {
       ),
 
     promote: async (registrationId: string) => {
+      this.assertCan("registrations.write");
       const rec = this.d.registrations.find((r) => r.id === registrationId);
       if (!rec) throw new DataError("NOT_FOUND");
       rec.status = "pending";
@@ -1101,6 +1250,7 @@ export class MockRepository implements Repository {
       deskShiftId?: string | null;
     }) => {
       // A breakdown that disagrees with the total is how disputes start.
+      this.assertCan("payments.collect");
       const sum = input.breakdown.reduce((s, b) => s + b.amount, 0);
       if (sum !== input.amount)
         throw new DataError(
@@ -1159,6 +1309,7 @@ export class MockRepository implements Repository {
     },
 
     review: async (id: string, decision: "verified" | "rejected" | "resubmit", note?: string) => {
+      const actor = this.assertCan("payments.verify");
       const rec = this.d.payments.find((p) => p.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
 
@@ -1166,7 +1317,6 @@ export class MockRepository implements Repository {
       if (rec.status === "verified" && decision === "verified") return clone(rec);
 
       const before = { status: rec.status };
-      const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
 
       rec.status = decision === "resubmit" ? "pending" : decision;
       rec.reviewedBy = actor.id;
@@ -1207,6 +1357,7 @@ export class MockRepository implements Repository {
     },
 
     runFraudSweep: async () => {
+      this.assertCan("payments.verify");
       const utrSeen = new Map<string, string>();
       const hashSeen = new Map<string, string>();
       const flagged: Payment[] = [];
@@ -1368,6 +1519,7 @@ export class MockRepository implements Repository {
       reasonCode: Refund["reasonCode"];
       reasonNote?: string;
     }) => {
+      const actor = this.assertCan("refunds.request");
       const pay = this.d.payments.find((p) => p.id === input.paymentId);
       if (!pay) throw new DataError("NOT_FOUND", "Payment not found");
       if (pay.status !== "verified")
@@ -1382,7 +1534,6 @@ export class MockRepository implements Repository {
           `₹${input.amount} would exceed the ₹${pay.amount - already} still refundable`,
         );
 
-      const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
       const rec: Refund = {
         id: uid("rfd"),
         serial: `${FEST.serials.refund}/${pad(this.d.refunds.length + 1, 4)}`,
@@ -1406,9 +1557,9 @@ export class MockRepository implements Repository {
     },
 
     approve: async (id: string) => {
+      const actor = this.assertCan("refunds.approve");
       const rec = this.d.refunds.find((r) => r.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
-      const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
       // Approving is a money decision — only the head may do it.
       if (actor.role !== "head")
         throw new DataError("FORBIDDEN", "Only the Registration Head can approve refunds");
@@ -1422,6 +1573,7 @@ export class MockRepository implements Repository {
     },
 
     markPaid: async (id: string, payoutRef: string) => {
+      this.assertCan("refunds.approve");
       const rec = this.d.refunds.find((r) => r.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
       if (rec.status !== "approved")
@@ -1445,6 +1597,7 @@ export class MockRepository implements Repository {
     },
 
     reject: async (id: string, note: string) => {
+      this.assertCan("refunds.approve");
       const rec = this.d.refunds.find((r) => r.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
       const before = { status: rec.status };
@@ -1464,6 +1617,7 @@ export class MockRepository implements Repository {
     list: async () => clone(this.d.settlements),
 
     importStatement: async (rows: string[][]) => {
+      this.assertCan("settlements.reconcile");
       const [header, ...body] = rows;
       const col = (n: string) =>
         header?.findIndex((h) => h.trim().toLowerCase().replace(/[^a-z]/g, "").includes(n)) ?? -1;
@@ -1514,6 +1668,7 @@ export class MockRepository implements Repository {
     },
 
     match: async (settlementId: string, paymentId: string) => {
+      this.assertCan("settlements.reconcile");
       const rec = this.d.settlements.find((s) => s.id === settlementId);
       if (!rec) throw new DataError("NOT_FOUND");
       rec.matchedPaymentId = paymentId;
@@ -1524,6 +1679,7 @@ export class MockRepository implements Repository {
     },
 
     unmatch: async (settlementId: string) => {
+      this.assertCan("settlements.reconcile");
       const rec = this.d.settlements.find((s) => s.id === settlementId);
       if (!rec) throw new DataError("NOT_FOUND");
       const before = { matchedPaymentId: rec.matchedPaymentId };
@@ -1616,6 +1772,7 @@ export class MockRepository implements Repository {
     },
 
     setVerified: async (id: string, verified: boolean) => {
+      this.assertCan("events.manage");
       const rec = this.d.colleges.find((c) => c.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
       const before = { isVerified: rec.isVerified };
@@ -1658,6 +1815,7 @@ export class MockRepository implements Repository {
     allStats: async () => Promise.all(this.d.events.map((e) => this.events.stats(e.id))),
 
     update: async (id: string, patch: Partial<FestEvent>) => {
+      this.assertCan("events.manage");
       const rec = this.d.events.find((e) => e.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
       const before: Record<string, unknown> = {};
@@ -1694,6 +1852,7 @@ export class MockRepository implements Repository {
 
     create: async (input: { eventId: string; name: string; leaderParticipantId: string }) => {
       const ev = this.d.events.find((e) => e.id === input.eventId);
+      this.assertCan("registrations.write");
       if (!ev) throw new DataError("NOT_FOUND", "Event not found");
       const rec: Team = {
         id: uid("tm"),
@@ -1712,6 +1871,7 @@ export class MockRepository implements Repository {
     },
 
     addMember: async (teamId: string, participantId: string) => {
+      this.assertCan("registrations.write");
       const t = this.d.teams.find((x) => x.id === teamId);
       if (!t) throw new DataError("NOT_FOUND");
       if (t.isLocked) throw new DataError("TEAM_LOCKED", "Roster is locked");
@@ -1726,6 +1886,7 @@ export class MockRepository implements Repository {
     },
 
     removeMember: async (teamId: string, participantId: string) => {
+      this.assertCan("registrations.write");
       const t = this.d.teams.find((x) => x.id === teamId);
       if (!t) throw new DataError("NOT_FOUND");
       if (t.isLocked) throw new DataError("TEAM_LOCKED", "Roster is locked");
@@ -1736,6 +1897,7 @@ export class MockRepository implements Repository {
     },
 
     setLocked: async (teamId: string, locked: boolean) => {
+      this.assertCan("registrations.write");
       const t = this.d.teams.find((x) => x.id === teamId);
       if (!t) throw new DataError("NOT_FOUND");
       t.isLocked = locked;
@@ -1778,9 +1940,9 @@ export class MockRepository implements Repository {
     },
 
     reviewSubstitution: async (id: string, decision: "approved" | "rejected") => {
+      const actor = this.assertCan("registrations.write");
       const rec = this.d.substitutions.find((s) => s.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
-      const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
       const before = { status: rec.status };
       rec.status = decision;
       rec.reviewedBy = actor.id;
@@ -1820,10 +1982,10 @@ export class MockRepository implements Repository {
       ),
 
     review: async (id: string, decision: "approved" | "rejected" | "resubmit", note?: string) => {
+      const actor = this.assertCan("documents.review");
       const rec = this.d.documents.find((d) => d.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
       if (rec.status === decision) return clone(rec);
-      const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
       const before = { status: rec.status };
       rec.status = decision;
       rec.reviewedBy = actor.id;
@@ -1874,6 +2036,9 @@ export class MockRepository implements Repository {
       })),
 
     allot: async (requestId: string, blockId: string, roomNo: string, bedNo: number) => {
+      // Authorisation FIRST, before any lookup. Validating the id first leaks
+      // whether a record exists to someone with no right to know.
+      const actor = this.assertCan("accommodation.allot");
       const req = this.d.accommodation.find((a) => a.id === requestId);
       if (!req) throw new DataError("NOT_FOUND", "Request not found");
       const block = HOSTEL_BLOCKS.find((b) => b.id === blockId);
@@ -1914,7 +2079,6 @@ export class MockRepository implements Repository {
       if (occupied.some((a) => a.bedNo === bedNo))
         throw new DataError("ROOM_FULL", `Bed ${bedNo} in room ${roomNo} is taken`);
 
-      const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
       const rec: RoomAllotment = {
         id: uid("alt"),
         requestId,
@@ -1978,6 +2142,7 @@ export class MockRepository implements Repository {
     },
 
     release: async (allotmentId: string) => {
+      this.assertCan("accommodation.allot");
       const i = this.d.allotments.findIndex((a) => a.id === allotmentId);
       if (i < 0) throw new DataError("NOT_FOUND");
       const rec = this.d.allotments[i];
@@ -1992,6 +2157,7 @@ export class MockRepository implements Repository {
     },
 
     checkIn: async (allotmentId: string, opts: { keyIssued: boolean; beddingIssued: boolean }) => {
+      this.assertCan("accommodation.allot");
       const rec = this.d.allotments.find((a) => a.id === allotmentId);
       if (!rec) throw new DataError("NOT_FOUND");
       if (rec.checkedInAt) return clone(rec);
@@ -2009,6 +2175,7 @@ export class MockRepository implements Repository {
     },
 
     checkOut: async (allotmentId: string, itemsReturned: boolean) => {
+      this.assertCan("accommodation.allot");
       const rec = this.d.allotments.find((a) => a.id === allotmentId);
       if (!rec) throw new DataError("NOT_FOUND");
       rec.checkedOutAt = nowIso();
@@ -2071,6 +2238,7 @@ export class MockRepository implements Repository {
     slots: async () => clone(this.d.pickupSlots),
 
     createSlot: async (input: Omit<PickupSlot, "id" | "status">) => {
+      this.assertCan("travel.manage");
       const rec: PickupSlot = { ...input, id: uid("pks"), status: "planned" };
       this.d.pickupSlots.push(rec);
       this.save("pickupSlots", rec);
@@ -2079,6 +2247,7 @@ export class MockRepository implements Repository {
     },
 
     assignToSlot: async (travelId: string, slotId: string) => {
+      this.assertCan("travel.manage");
       const rec = this.d.travel.find((t) => t.id === travelId);
       if (!rec) throw new DataError("NOT_FOUND");
       const slot = this.d.pickupSlots.find((s) => s.id === slotId);
@@ -2093,6 +2262,7 @@ export class MockRepository implements Repository {
     },
 
     setSlotStatus: async (slotId: string, status: PickupSlot["status"]) => {
+      this.assertCan("travel.manage");
       const rec = this.d.pickupSlots.find((s) => s.id === slotId);
       if (!rec) throw new DataError("NOT_FOUND");
       const before = { status: rec.status };
@@ -2128,6 +2298,11 @@ export class MockRepository implements Repository {
       eventId?: string | null;
       method?: "qr" | "manual" | "self";
     }) => {
+      // Authorisation FIRST — before the idempotency short-circuit below, which
+      // would otherwise return success to an unauthorised caller for anyone who
+      // happened to be checked in already.
+      const actor = this.assertCan("attendance.checkin");
+
       // Idempotent — the gate volunteer will scan the same badge twice.
       const existing = this.d.attendance.find(
         (a) =>
@@ -2137,7 +2312,6 @@ export class MockRepository implements Repository {
       );
       if (existing) return { record: clone(existing), wasAlready: true };
 
-      const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
       const reg = input.eventId
         ? this.d.registrations.find(
             (r) => r.participantId === input.participantId && r.eventId === input.eventId,
@@ -2188,6 +2362,7 @@ export class MockRepository implements Repository {
     shifts: async () => clone(this.d.shifts),
 
     openShift: async (input: { staffId: string; deskName: string; openingFloat: number }) => {
+      this.assertCan("payments.collect");
       const rec: DeskShift = {
         id: uid("shf"),
         staffId: input.staffId,
@@ -2209,6 +2384,7 @@ export class MockRepository implements Repository {
     },
 
     closeShift: async (id: string, countedCash: number, handoverTo: string) => {
+      this.assertCan("payments.collect");
       const rec = this.d.shifts.find((s) => s.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
       rec.status = "closed";
@@ -2258,11 +2434,11 @@ export class MockRepository implements Repository {
     kits: async () => clone(this.d.kits),
 
     issueKit: async (input: { participantId: string; items: string[]; signature: boolean }) => {
+      const actor = this.assertCan("registrations.write");
       const existing = this.d.kits.find((k) => k.participantId === input.participantId);
       if (existing)
         throw new DataError("VALIDATION_FAILED", "Kit already issued to this participant");
       const p = this.d.participants.find((x) => x.id === input.participantId);
-      const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
       const rec: KitIssue = {
         id: uid("kit"),
         participantId: input.participantId,
@@ -2317,10 +2493,10 @@ export class MockRepository implements Repository {
       audience: RegistrationFilter & ParticipantFilter;
       scheduledAt?: string | null;
     }) => {
+      const actor = this.assertCan("comms.send");
       const tpl = this.d.templates.find((t) => t.id === input.templateId);
       if (!tpl) throw new DataError("NOT_FOUND", "Template not found");
       const people = await this.comms.previewAudience(input.audience);
-      const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
 
       const rec: Broadcast = {
         id: uid("bc"),
@@ -2383,7 +2559,7 @@ export class MockRepository implements Repository {
       kind: CertificateIssue["kind"];
       participantIds: string[];
     }) => {
-      const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
+      const actor = this.assertCan("certificates.issue");
       let issued = 0;
       const skipped: { participantId: string; reason: string }[] = [];
 
@@ -2432,6 +2608,7 @@ export class MockRepository implements Repository {
     },
 
     revoke: async (id: string, reason: string) => {
+      this.assertCan("certificates.issue");
       const rec = this.d.certificates.find((c) => c.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
       rec.revokedAt = nowIso();
@@ -2486,6 +2663,7 @@ export class MockRepository implements Repository {
     },
 
     resolve: async (id: string, note: string) => {
+      this.assertCan("helpdesk.manage");
       const rec = this.d.tickets.find((t) => t.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
       const before = { status: rec.status };
@@ -2507,9 +2685,9 @@ export class MockRepository implements Repository {
     list: async () => clone(this.d.staff),
 
     update: async (id: string, patch: Partial<StaffMember>) => {
+      const actor = this.assertCan("staff.manageRoles");
       const rec = this.d.staff.find((s) => s.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
-      const actor = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
       if (patch.role && actor.role !== "head")
         throw new DataError("FORBIDDEN", "Only the Registration Head can change roles");
       const before: Record<string, unknown> = {};
@@ -2557,23 +2735,23 @@ export class MockRepository implements Repository {
   };
 
   admin = {
-    actor: async (): Promise<Actor> => {
-      const s = this.d.staff.find((x) => x.id === this.d.actorId) ?? this.d.staff[0];
-      return { id: s.id, name: s.name, role: s.role };
-    },
-
-    setActor: async (staffId: string): Promise<Actor> => {
-      const s = this.d.staff.find((x) => x.id === staffId);
-      if (!s) throw new DataError("NOT_FOUND");
-      this.d.actorId = staffId;
-      this.s.patch({ t: "meta", k: "actorId", v: staffId });
-      return { id: s.id, name: s.name, role: s.role };
+    /**
+     * Derived from the session. There is deliberately no setter — the old
+     * "act as anyone" picker was a one-click privilege escalation once real
+     * accounts existed.
+     */
+    actor: async (): Promise<Actor | null> => {
+      const s = this.currentStaff();
+      return s ? { id: s.id, name: s.name, role: s.role } : null;
     },
 
     reset: async (seed?: number) => {
       clockOffsetMs = 0;
       this.s = resetStore(seed);
       this.version++;
+      // Drop the session too: a token pointing at a staff record that has just
+      // been regenerated leaves the console half-signed-in.
+      sessionStore.clear();
     },
 
     tick: async () => {

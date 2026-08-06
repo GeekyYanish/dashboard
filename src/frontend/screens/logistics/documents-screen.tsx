@@ -16,6 +16,7 @@ import {
   toast,
   type Column,
 } from "@/frontend/components/neo";
+import { GatedButton } from "@/frontend/components/gated";
 import { useAsync } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
@@ -154,7 +155,8 @@ export function DocumentsScreen() {
           >
             <span className="sr-only">Request re-upload</span>
           </NeoButton>
-          <NeoButton
+          <GatedButton
+            capability="documents.review"
             size="sm"
             variant="secondary"
             icon={<X />}
@@ -162,8 +164,9 @@ export function DocumentsScreen() {
             onClick={() => review(d.id, "rejected", "Does not meet requirements")}
           >
             Reject
-          </NeoButton>
-          <NeoButton
+          </GatedButton>
+          <GatedButton
+            capability="documents.review"
             size="sm"
             variant="primary"
             icon={<Check />}
@@ -171,7 +174,7 @@ export function DocumentsScreen() {
             onClick={() => review(d.id, "approved")}
           >
             Approve
-          </NeoButton>
+          </GatedButton>
         </div>
       ),
     },

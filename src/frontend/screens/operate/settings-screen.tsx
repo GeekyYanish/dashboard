@@ -29,6 +29,8 @@ import {
   type Column,
 } from "@/frontend/components/neo";
 import { useAsync } from "@/frontend/hooks/use-async";
+import { ALL_CAPABILITIES, CAPABILITY_LABELS, can } from "@/lib/auth/permissions";
+import { cn } from "@/lib/utils";
 import { getRepo } from "@/lib/data";
 import { usePrefs } from "@/frontend/prefs";
 import {
@@ -313,48 +315,39 @@ export function SettingsScreen({ initialTab = "fest" }: { initialTab?: Tab }) {
         <div className="space-y-4">
           <NeoCard>
             <NeoCard.Header
-              eyebrow="Acting as"
-              title="Switch role"
-              subtitle="Permissions are enforced in the data layer, not just hidden. Switch to a Finance Verifier and try approving a refund — it throws FORBIDDEN."
+              eyebrow="Signed in as"
+              title={actor.data?.name ?? "Not signed in"}
+              subtitle={
+                actor.data
+                  ? roleById(actor.data.role)?.blurb
+                  : "Sign in to see what your role can do."
+              }
+              icon={<Lock />}
+              actions={
+                actor.data ? (
+                  <StatusBadge tone="signal" size="sm">
+                    {roleById(actor.data.role)?.label}
+                  </StatusBadge>
+                ) : null
+              }
             />
-            <NeoCard.Body flush>
-              <ul className="divide-y divide-hairline">
-                {(staff.data ?? []).map((s) => (
-                  <li key={s.id} className="flex items-center gap-3 px-4 py-2.5">
-                    <NeoAvatar name={s.name} size={30} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[0.85rem] font-medium text-ink">
-                        {s.name}
-                      </span>
-                      <span className="block truncate text-[0.73rem] text-ink-muted">
-                        {roleById(s.role)?.blurb}
-                      </span>
-                    </span>
-                    {actor.data?.id === s.id ? (
-                      <StatusBadge tone="signal" size="sm">
-                        Acting as
-                      </StatusBadge>
-                    ) : (
-                      <NeoButton
-                        size="sm"
-                        variant="secondary"
-                        onClick={async () => {
-                          await getRepo().admin.setActor(s.id);
-                          toast.success(`Now acting as ${s.name}`, roleById(s.role)?.label);
-                          actor.reload();
-                        }}
-                      >
-                        Act as
-                      </NeoButton>
-                    )}
-                  </li>
-                ))}
-              </ul>
+            <NeoCard.Body>
+              <p className="text-[0.83rem] leading-relaxed text-ink-soft">
+                Roles are changed by the Registration Head from{" "}
+                <span className="font-medium text-ink">Team &amp; roster</span>, and take effect on
+                the member&apos;s next action. There is deliberately no &ldquo;act as someone
+                else&rdquo; switch here — it existed before login, and with real accounts it would
+                be a one-click privilege escalation.
+              </p>
             </NeoCard.Body>
           </NeoCard>
 
           <NeoCard>
-            <NeoCard.Header eyebrow="Matrix" title="What each role can do" />
+            <NeoCard.Header
+              eyebrow="Matrix"
+              title="What each role can do"
+              subtitle="Rendered from the same capability map the data layer enforces — this table cannot drift out of step with what actually happens."
+            />
             <NeoCard.Body flush>
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse">
@@ -362,32 +355,52 @@ export function SettingsScreen({ initialTab = "fest" }: { initialTab?: Tab }) {
                     <tr className="border-b border-hairline">
                       <th className="engraved px-4 py-2.5 text-left">Capability</th>
                       {STAFF_ROLES.map((r) => (
-                        <th key={r.id} className="engraved px-3 py-2.5 text-center">
+                        <th
+                          key={r.id}
+                          className={cn(
+                            "engraved px-3 py-2.5 text-center",
+                            actor.data?.role === r.id && "!text-signal",
+                          )}
+                        >
                           {r.label.split(" ")[0]}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {(
-                      [
-                        ["View everything", ["head", "coordinator", "finance", "desk", "viewer"]],
-                        ["Create registrations", ["head", "coordinator", "desk"]],
-                        ["Verify payments", ["head", "coordinator", "finance"]],
-                        ["Approve refunds", ["head"]],
-                        ["Reconcile bank statement", ["head", "finance"]],
-                        ["Allot accommodation", ["head", "coordinator"]],
-                        ["Collect cash at desk", ["head", "desk"]],
-                        ["Send broadcasts", ["head", "coordinator"]],
-                        ["Change roles", ["head"]],
-                        ["Erase personal data", ["head"]],
-                      ] as [string, string[]][]
-                    ).map(([cap, roles]) => (
-                      <tr key={cap} className="border-b border-hairline">
-                        <td className="px-4 py-2.5 text-[0.82rem] text-ink-soft">{cap}</td>
+                    <tr className="border-b border-hairline">
+                      <td className="px-4 py-2.5 text-[0.82rem] text-ink-soft">
+                        View everything
+                      </td>
+                      {STAFF_ROLES.map((r) => (
+                        <td
+                          key={r.id}
+                          className={cn(
+                            "px-3 py-2.5 text-center",
+                            actor.data?.role === r.id && "bg-signal-soft/40",
+                          )}
+                        >
+                          <Check className="mx-auto size-4 text-paid" />
+                        </td>
+                      ))}
+                    </tr>
+                    {ALL_CAPABILITIES.map((capability) => (
+                      <tr key={capability} className="border-b border-hairline">
+                        <td className="px-4 py-2.5 text-[0.82rem] text-ink-soft">
+                          {CAPABILITY_LABELS[capability]}
+                          <span className="ml-2 font-mono text-[0.68rem] text-ink-faint">
+                            {capability}
+                          </span>
+                        </td>
                         {STAFF_ROLES.map((r) => (
-                          <td key={r.id} className="px-3 py-2.5 text-center">
-                            {roles.includes(r.id) ? (
+                          <td
+                            key={r.id}
+                            className={cn(
+                              "px-3 py-2.5 text-center",
+                              actor.data?.role === r.id && "bg-signal-soft/40",
+                            )}
+                          >
+                            {can(r.id, capability) ? (
                               <Check className="mx-auto size-4 text-paid" />
                             ) : (
                               <X className="mx-auto size-4 text-ink-faint opacity-40" />
@@ -400,6 +413,12 @@ export function SettingsScreen({ initialTab = "fest" }: { initialTab?: Tab }) {
                 </table>
               </div>
             </NeoCard.Body>
+            <NeoCard.Footer>
+              <span className="text-[0.75rem] leading-snug">
+                Every row is asserted in both directions by the test suite — an allowed role
+                succeeds, a denied role throws FORBIDDEN.
+              </span>
+            </NeoCard.Footer>
           </NeoCard>
         </div>
       ) : null}

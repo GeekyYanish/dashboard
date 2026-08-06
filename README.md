@@ -10,13 +10,55 @@ engraved labels, tactile controls, in light and dark.
 ```bash
 npm install
 npm run dev      # http://localhost:3000
-npm test         # 39 assertions against the data layer, headless
+npm test         # 61 assertions against the data layer, headless
 ```
 
-Seeded with a deterministic dataset — **2,414 participants, 6,161
-registrations, 1,939 payments, 65 colleges, 44 events** — frozen a week before
-the fest, when the team is at peak load: the verification queue is deep,
-hostels are half-allotted, documents are still arriving.
+## Sign in
+
+Five accounts, one per role. What you can do in the console depends on which one
+you use — the differences are real, not cosmetic.
+
+| Role | Email | Password |
+|---|---|---|
+| Registration Head | `head@gateways26.in` | `Kestrel$Fest26` |
+| Coordinator | `coordinator@gateways26.in` | `Marigold$Fest26` |
+| Finance Verifier | `finance@gateways26.in` | `Sandalwood$26x` |
+| Desk Volunteer | `desk@gateways26.in` | `Peregrine$26x` |
+| Viewer | `viewer@gateways26.in` | `Cardamom$Fest26` |
+
+Every account forces a password change on first sign-in — a documented default
+is a way in, not a way to run a fest. **Reset demo data** on the login screen
+restores them, so a forgotten password cannot lock you out of your own demo.
+
+> ### This login is not a security boundary
+>
+> Everything runs in the browser. Anyone with devtools can edit the stored
+> session and make themselves Registration Head. Only a server the browser
+> cannot edit fixes that, and there isn't one yet — so this build is
+> **demo-grade**, and the login screen says so too.
+>
+> Two things are still done properly, because there is no excuse not to:
+> passwords are **PBKDF2-SHA256** hashed with a per-user salt and never stored
+> in plaintext, and all seventeen permissions are enforced **in the data
+> layer**, not by hiding buttons. When a backend lands, `assertCan()` moves into
+> a server action and no screen code changes.
+
+## The data
+
+Configuration a real deployment needs on day one — 68 colleges, the 44-event
+catalogue, fee rules, document requirements, hostel blocks — plus **one small
+worked example**: 20 participants and their registrations, payments, documents,
+accommodation and travel, so no screen is blank and every flow can be shown
+without data entry.
+
+Fixtures are dated relative to the fest, so the seeded state is always a genuine
+pre-fest one. Attendance is near-zero on purpose: nobody checks in weeks early,
+and faking it would make every downstream number lie.
+
+Deleting the `PEOPLE` array in
+[`src/lib/data/local/seed.ts`](src/lib/data/local/seed.ts) and shipping only
+[`catalogue.ts`](src/lib/data/local/catalogue.ts) gives a genuine empty
+production start.
 
 ---
 
@@ -98,27 +140,49 @@ Failures throw `DataError` with a stable code (`UTR_ALREADY_USED`,
 Data fetching goes through `useAsync`, whose `{ data, error, loading, reload }`
 shape mirrors TanStack Query — so that swap is a hook rename, not a rewrite.
 
+### Auth
+
+Three files, all in [`src/lib/auth/`](src/lib/auth/):
+
+- **`permissions.ts`** — the seventeen-capability map, and the only place it is
+  written down. `assertCan()` in the repository and `useCan()` in the UI both
+  read it, so the settings matrix cannot drift from what is enforced.
+- **`crypto.ts`** — PBKDF2-SHA256, 100k iterations, 16-byte per-user salt,
+  constant-time compare. Isomorphic (Web Crypto exists in Node), which is how
+  `npm test` exercises the real hashing path rather than a stub.
+- **`session.ts`** — mint / read / expire, 12-hour TTL with sliding refresh, and
+  cross-tab sync so signing out in one tab does not leave another authenticated.
+  Falls back to memory when localStorage is unavailable.
+
+Route guards are a client component
+([`auth-gate.tsx`](src/frontend/components/shell/auth-gate.tsx)) rather than
+`middleware.ts` — middleware runs on the server, and there is no server session
+for it to read. That is the first thing to replace when a backend lands.
+
 ### Storage
 
-The seeded dataset serialises to ~7 MB, comfortably over the localStorage
-quota. So the store persists only **mutations**: the seed regenerates
-deterministically on boot (same seed → same data) and a compacted overlay of
-changed records replays on top. Writes survive a reload without ever hitting
-the quota.
+The store persists only **mutations**: the seed regenerates deterministically on
+boot (same seed → same data) and a compacted overlay of changed records replays
+on top. That design was forced by the original 7 MB dataset overrunning the
+localStorage quota; it is kept because it also makes "reset to a known state" a
+single delete.
 
 ### Performance
 
-Every derived figure is per-participant and the console asks for them 2,400 at
-a time. Done naively that is a linear scan of 6,000 registrations per
-participant — measured at ~1.8 s to paint the overview. `MockRepository` builds
-indexes once per mutation (invalidated by a `version` counter bumped in the
-single write path), which drops it to ~30 ms:
+Left over from when the fixtures were 2,414 participants and 6,161
+registrations. Every derived figure is per-participant, and computing them
+naively meant a linear scan of every registration *per person* — measured at
+~1.8 s to paint the overview. `MockRepository` builds indexes once per mutation,
+invalidated by a `version` counter bumped in the single write path:
 
 | Call | Before | After |
 |---|---|---|
 | `overview.stats` | 767 ms | 32 ms |
 | `documents.completeness` | 792 ms | 6 ms |
 | `payments.outstanding` | 391 ms | 13 ms |
+
+The indexes are worth keeping at any size, and they are what lets the dataset
+grow back toward real numbers without the console slowing down.
 
 ---
 
@@ -166,21 +230,47 @@ Not UI-level hints — these live in the repository and throw:
 - **Under-18s require guardian consent** before a badge or a bed.
 - **Check-in is idempotent** — the gate volunteer will scan the same badge twice.
 - **You cannot certify someone who never turned up.**
-- **Every mutation writes an audit event.** No silent writes.
+- **Every mutation writes an audit event**, attributed to the signed-in account.
+  No silent writes, no anonymous ones.
 - **Erasure anonymises identity but retains the money trail** — a privacy
   request cannot delete an audited financial record.
 
+And on access:
+
+- **Every mutation requires a session.** No session, `NOT_AUTHENTICATED`.
+- **Seventeen capabilities, enforced.** The matrix in Settings is *rendered from
+  the same map* the repository checks, so it cannot drift out of step with what
+  actually happens.
+- **Authorisation runs before validation.** Gates are the first statement of
+  every method — checking the id first would both skip the gate on a bad id and
+  leak whether a record exists.
+- **Five failed sign-ins lock an account** for a minute.
+
 Each is asserted in the suite.
+
+### What each role can actually do
+
+Verified by signing in as all five and attempting every action:
+
+| | register | verify | refund | reconcile | docs | allot | check-in | roles | erase |
+|---|---|---|---|---|---|---|---|---|---|
+| **Head** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Coordinator** | ✓ | ✓ | — | — | ✓ | ✓ | ✓ | — | — |
+| **Finance** | — | ✓ | — | ✓ | — | — | — | — | — |
+| **Desk** | ✓ | — | — | — | — | — | ✓ | — | — |
+| **Viewer** | — | — | — | — | — | — | — | — | — |
+
+Every role can *read* the whole console; only mutations are gated.
 
 ---
 
 ## Verification
 
 ```bash
-npm test           # 39 assertions, headless, deterministic reseed → 39/39
+npm test           # 61 assertions, headless, deterministic reseed → 61/61
 npx tsc --noEmit   # clean
 npm run lint       # 0 errors
-npm run build      # 33 routes
+npm run build      # 38 routes
 ```
 
 Two dev-only routes (they 404 in production):
@@ -188,22 +278,34 @@ Two dev-only routes (they 404 in production):
 - **`/dev/kitchen-sink`** — every primitive in every state, both families side
   by side. This is the visual regression surface; check it in **both themes**
   after any change to the tokens or depth utilities in `globals.css`.
-- **`/dev/data-test`** — the same 39 assertions in the browser, wiping and
+- **`/dev/data-test`** — the same 61 assertions in the browser, wiping and
   reseeding on each run. `npm test` and this page execute the same
   [`suite.ts`](src/frontend/screens/dev/suite.ts).
 
+### Prove the permissions are real
+
+Sign in as **Viewer** and try to verify a payment. You get a specific refusal —
+*"Your role cannot do this — payments.verify requires Registration Head or
+Coordinator or Finance Verifier"* — thrown by the repository, not the UI.
+
+Then sign in as **Finance**: verifying works, approving a refund does not. That
+asymmetry is the whole point, and the suite asserts it in both directions for
+all seventeen capabilities.
+
 ### End-to-end walkthrough
 
-1. `/desk` — register a walk-in, collect ₹450 cash.
-2. `/payments/drawer` — the cash appears in the open shift's expected total.
-3. `/payments/queue` — verify a UPI payment (`A`); an invoice serial is issued
-   and its registrations flip to confirmed.
-4. `/accommodation` — auto-allot; unpaid or document-incomplete requests are
+1. `/login` — sign in as the Desk Volunteer, set a password.
+2. `/desk` — register a walk-in, collect ₹450 cash.
+3. `/payments/drawer` — the cash appears in the open shift's expected total.
+4. Sign out, sign in as **Finance**. `/payments/queue` — verify a UPI payment
+   (`A`); an invoice serial is issued and its registrations flip to confirmed.
+5. Try `/payments/refunds` → Approve. It refuses: only the Head can.
+6. Sign in as the **Head** and approve it.
+7. `/accommodation` — auto-allot; unpaid or document-incomplete requests are
    refused with the specific reason.
-5. `/checkin` — check the participant in; scan again and it reports "already
-   checked in" rather than double-counting.
-6. `/` — KPIs, funnel and activity feed have all moved.
-7. `/audit` — every one of those steps is logged with actor and before/after.
+8. `/` — KPIs, funnel and activity feed have all moved.
+9. `/audit` — every step is logged against **the account that did it**, not a
+   generic admin.
 
 ### Reconciliation round-trip
 

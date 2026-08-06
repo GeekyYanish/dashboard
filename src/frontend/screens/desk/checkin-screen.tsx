@@ -278,7 +278,10 @@ export function CheckinScreen() {
               <NeoCard.Header eyebrow="Just now" title="Recent check-ins" />
               <NeoCard.Body flush>
                 {recent.length === 0 ? (
-                  <EmptyState title="Nothing yet" hint="Check-ins appear here as they happen." />
+                  <EmptyState
+                    title="Nothing yet today"
+                    hint={`Check-ins appear here as they happen. Attendance opens on ${FEST.days[0].label} — ${new Date(FEST.startsAt).toLocaleDateString("en-IN", { day: "numeric", month: "long" })}.`}
+                  />
                 ) : (
                   <ul className="divide-y divide-hairline">
                     {recent.map((r, i) => (
@@ -334,7 +337,7 @@ export function CheckinScreen() {
                 rowKey={(r) => r.id}
                 loading={noShows.loading}
                 pageSize={20}
-                empty={<EmptyState title="Everyone turned up" hint="No no-shows for this event." />}
+                empty={<EmptyState title="No no-shows" hint="Nobody confirmed for this event has failed to arrive — or the event has not run yet." />}
               />
             )}
           </NeoCard.Body>

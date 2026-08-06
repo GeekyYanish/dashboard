@@ -70,7 +70,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
           <Topbar
             onMenu={() => setMobileOpen(true)}
             onOpenPalette={() => setPaletteOpen(true)}
-            actor={actor.data}
+            actor={actor.data ?? undefined}
             announcements={announcements.data}
             onReload={() => {
               stats.reload();

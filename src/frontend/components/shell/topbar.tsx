@@ -12,6 +12,8 @@ import {
   Bell,
   ChevronRight,
   RotateCw,
+  KeyRound,
+  LogOut,
 } from "lucide-react";
 import {
   NeoIconButton,
@@ -23,6 +25,7 @@ import {
   SectionRule,
 } from "@/frontend/components/neo";
 import { usePrefs } from "@/frontend/prefs";
+import { useAuth } from "@/frontend/hooks/use-auth";
 import { useDaysUntil } from "@/frontend/hooks/use-now";
 import { ALL_NAV_ITEMS } from "@/frontend/nav";
 import { FEST, roleById } from "@/lib/fest.config";
@@ -46,6 +49,7 @@ export function Topbar({
   const router = useRouter();
   const pathname = usePathname();
   const { theme, toggleTheme, density, setDensity } = usePrefs();
+  const { signOut } = useAuth();
   const [mac, setMac] = useState(false);
 
   useEffect(() => {
@@ -214,10 +218,21 @@ export function Topbar({
             </div>
             <div className="my-1 h-px bg-engrave" />
             <MenuItem onClick={() => router.push("/settings")}>Settings</MenuItem>
-            <MenuItem onClick={() => router.push("/settings/roles")}>
-              Switch role
+            <MenuItem icon={<KeyRound />} onClick={() => router.push("/login/set-password")}>
+              Change password
             </MenuItem>
             <MenuItem onClick={() => router.push("/audit")}>My activity</MenuItem>
+            <div className="my-1 h-px bg-engrave" />
+            <MenuItem
+              icon={<LogOut />}
+              danger
+              onClick={async () => {
+                await signOut();
+                router.replace("/login");
+              }}
+            >
+              Sign out
+            </MenuItem>
           </NeoPopover>
         ) : null}
       </div>

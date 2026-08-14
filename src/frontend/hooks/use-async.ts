@@ -23,6 +23,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
   const [error, setError] = useState<Error>();
   const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
+  const [externalNonce, setExternalNonce] = useState(0);
 
   // The latest fetcher is stashed in an effect, never written during render —
   // a ref mutation while rendering is unsafe once React can render
@@ -32,6 +33,20 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
   useEffect(() => {
     fnRef.current = fn;
   });
+
+  // The console shell broadcasts a refresh after its 15-second poll, when the
+  // tab regains focus, and when the selected event changes. Listening here
+  // keeps every mounted core view in the same live scope without duplicating
+  // timers in each screen.
+  useEffect(() => {
+    const refresh = () => setExternalNonce((value) => value + 1);
+    window.addEventListener("aurora:reload", refresh);
+    window.addEventListener("registration-console:event-scope", refresh);
+    return () => {
+      window.removeEventListener("aurora:reload", refresh);
+      window.removeEventListener("registration-console:event-scope", refresh);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +68,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, nonce]);
+  }, [...deps, nonce, externalNonce]);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
   const mutate = useCallback((next: T) => setData(next), []);

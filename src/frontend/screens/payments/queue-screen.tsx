@@ -221,7 +221,7 @@ export function QueueScreen() {
                             {who?.fullName ?? "Unknown"}
                           </span>
                           <span className="tnum block truncate text-[0.72rem] text-ink-muted">
-                            {inr(p.amount)} · {titleCase(p.method)}
+                            {inr(p.amount)} · {p.method ? titleCase(p.method) : "Not recorded"}
                           </span>
                         </span>
                         <span className="flex shrink-0 flex-col items-end gap-1">
@@ -422,7 +422,7 @@ function ReviewPane({
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <StatusBadge tone="info" size="sm" dot={false}>
-                  {PAYMENT_METHODS.find((m) => m.id === payment.method)?.label}
+                  {PAYMENT_METHODS.find((m) => m.id === payment.method)?.label ?? "Not recorded"}
                 </StatusBadge>
                 <StatusBadge tone={slaTone(age)} size="sm" dot={false}>
                   Waiting {slaLabel(age)}

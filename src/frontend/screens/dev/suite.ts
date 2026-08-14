@@ -304,13 +304,17 @@ export const SUITE: { group: string; name: string; fn: TestFn }[] = [
   },
   {
     group: "RBAC",
-    name: "A Finance Verifier can verify but cannot allot a bed",
+    name: "A Finance Verifier cannot verify or allot a bed",
     fn: async ({ assert, repo }) => {
       await signInAs("finance");
       const queue = await repo.payments.queue();
       if (queue.length) {
-        const done = await repo.payments.review(queue[0].id, "verified");
-        assert(done.status === "verified", "Finance could not verify a payment");
+        try {
+          await repo.payments.review(queue[0].id, "verified");
+          assert(false, "Finance verified a payment");
+        } catch (e) {
+          assert(isDataError(e) && e.code === "FORBIDDEN", "Finance payment review was not refused");
+        }
       }
       const reqs = await repo.accommodation.requests("requested");
       if (reqs.length) {
@@ -366,7 +370,7 @@ export const SUITE: { group: string; name: string; fn: TestFn }[] = [
     group: "RBAC",
     name: "The audit log records who actually did it",
     fn: async ({ assert, repo }) => {
-      await signInAs("finance");
+      await signInAs("head");
       const me = await repo.auth.session();
       const queue = await repo.payments.queue();
       if (!queue.length) return;

@@ -25,8 +25,8 @@ import type { StaffRoleId } from "../fest.config";
 export const CAPABILITIES = {
   "registrations.write": ["head", "coordinator", "desk"],
   "registrations.cancel": ["head", "coordinator"],
-  "payments.verify": ["head", "coordinator", "finance"],
-  "payments.collect": ["head", "desk"],
+  "payments.verify": ["head"],
+  "payments.collect": ["head"],
   "refunds.request": ["head", "coordinator", "finance"],
   "refunds.approve": ["head"],
   "settlements.reconcile": ["head", "finance"],
@@ -37,7 +37,7 @@ export const CAPABILITIES = {
   "comms.send": ["head", "coordinator"],
   "certificates.issue": ["head", "coordinator"],
   "helpdesk.manage": ["head", "coordinator", "desk"],
-  "events.manage": ["head", "coordinator"],
+  "events.manage": ["head"],
   "staff.manageRoles": ["head"],
   "participants.erase": ["head"],
 } as const satisfies Record<string, readonly StaffRoleId[]>;

@@ -172,6 +172,8 @@ export interface RegistrationRepo {
     source?: "online" | "on_spot" | "csv_import";
   }): Promise<Registration>;
   setStatus(id: string, status: RegistrationStatus, reason?: string): Promise<Registration>;
+  /** ADMIN-only, registration-specific payment-gate override with an audit reason. */
+  overridePayment?(id: string, reason: string): Promise<Registration>;
   /** Cancelling a confirmed seat promotes the earliest waitlister. */
   cancel(id: string, reason: string): Promise<{ cancelled: Registration; promoted: Registration | null }>;
   bulkSetStatus(ids: string[], status: RegistrationStatus, reason?: string): Promise<number>;
@@ -422,6 +424,16 @@ export interface HelpdeskRepo {
 export interface StaffRepo {
   list(): Promise<StaffMember[]>;
   update(id: string, patch: Partial<StaffMember>): Promise<StaffMember>;
+  create?(input: {
+    name: string;
+    email: string;
+    phone: string;
+    temporaryPassword: string;
+    role: StaffRoleId;
+    eventId: string | null;
+  }): Promise<StaffMember>;
+  grantAssignment?(id: string, role: StaffRoleId, eventId: string | null): Promise<StaffMember>;
+  revokeAssignment?(id: string, assignmentId: string): Promise<StaffMember>;
   /** Verifications done, walk-ins handled, tickets closed — per member. */
   workload(): Promise<{ staffId: string; verifications: number; walkIns: number; tickets: number }[]>;
 }

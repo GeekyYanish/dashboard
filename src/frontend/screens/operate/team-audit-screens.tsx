@@ -8,6 +8,8 @@ import {
   Download,
   ShieldCheck,
   Activity,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { Page, PageHeader, StatGrid } from "@/frontend/components/page";
 import {
@@ -20,6 +22,8 @@ import {
   EmptyState,
   NeoSegmented,
   NeoSelect,
+  NeoInput,
+  NeoModal,
   toast,
   type Column,
 } from "@/frontend/components/neo";
@@ -31,6 +35,10 @@ import { isDataError, type AuditEvent, type StaffMember } from "@/lib/data/types
 import { FEST, STAFF_ROLES, roleById } from "@/lib/fest.config";
 import { titleCase } from "@/frontend/status";
 import { downloadCsv, relativeTime } from "@/lib/utils";
+import { useAuth } from "@/frontend/hooks/use-auth";
+import type { StaffRoleId } from "@/lib/fest.config";
+
+const CORE_STAFF_ROLES = STAFF_ROLES.filter((role) => ["head", "coordinator", "desk"].includes(role.id));
 
 /* ==========================================================================
    Team & duty roster — the registration team managing itself.
@@ -38,10 +46,17 @@ import { downloadCsv, relativeTime } from "@/lib/utils";
 
 export function TeamScreen() {
   const lookups = useLookups();
+  const { role: actorRole } = useAuth();
   const [view, setView] = useState<"people" | "shifts" | "workload">("people");
   const staff = useAsync(() => getRepo().staff.list(), []);
   const workload = useAsync(() => getRepo().staff.workload(), []);
   const shifts = useAsync(() => getRepo().desk.shifts(), []);
+  const events = useAsync(() => getRepo().events.list(), []);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [newStaff, setNewStaff] = useState({ name: "", email: "", phone: "", temporaryPassword: "", role: "desk" as StaffRoleId, eventId: "" });
+  const canManageStaff = actorRole === "head";
 
   const workloadMap = useMemo(
     () => new Map((workload.data ?? []).map((w) => [w.staffId, w])),
@@ -69,9 +84,11 @@ export function TeamScreen() {
       width: "180px",
       sortValue: (s) => s.role,
       cell: (s) => (
-        <NeoSelect
-          value={s.role}
-          onChange={async (e) => {
+        <div className="space-y-1.5">
+          <NeoSelect
+            value={s.role}
+            disabled={!canManageStaff}
+            onChange={async (e) => {
             try {
               await getRepo().staff.update(s.id, { role: e.target.value as StaffMember["role"] });
               toast.success("Role updated", `${s.name} is now ${roleById(e.target.value as never)?.label}`);
@@ -85,9 +102,38 @@ export function TeamScreen() {
               );
               staff.reload();
             }
-          }}
-          options={STAFF_ROLES.map((r) => ({ value: r.id, label: r.label }))}
-        />
+            }}
+            options={CORE_STAFF_ROLES.map((r) => ({ value: r.id, label: r.label }))}
+          />
+          {s.assignments?.length ? (
+            <div className="flex flex-wrap gap-1">
+              {s.assignments.map((assignment) => (
+                <span key={assignment.id} className="inline-flex items-center gap-1 rounded-full bg-plane-alt px-1.5 py-0.5 text-[0.65rem] text-ink-muted">
+                  {roleById(assignment.role)?.label ?? assignment.role}
+                  {assignment.eventId ? ` · ${events.data?.find((event) => event.id === assignment.eventId)?.title ?? "event"}` : " · global"}
+                  {canManageStaff && getRepo().staff.revokeAssignment ? (
+                    <button
+                      type="button"
+                      aria-label={`Revoke ${roleById(assignment.role)?.label ?? assignment.role} assignment`}
+                      className="text-ink-faint hover:text-failed"
+                      onClick={async () => {
+                        try {
+                          await getRepo().staff.revokeAssignment?.(s.id, assignment.id);
+                          toast.success("Assignment revoked");
+                          staff.reload();
+                        } catch (err) {
+                          toast.error(isDataError(err) ? err.message : "Could not revoke assignment");
+                        }
+                      }}
+                    >
+                      <Trash2 className="size-3" />
+                    </button>
+                  ) : null}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
       ),
     },
     {
@@ -140,24 +186,31 @@ export function TeamScreen() {
         title="Team & duty roster"
         description="The registration team managing itself: who holds which role, who is on which desk, and how much each person has actually processed."
         actions={
-          <NeoButton
-            size="sm"
-            variant="secondary"
-            icon={<Download />}
-            onClick={() =>
-              downloadCsv("team-workload.csv", [
-                ["Name", "Email", "Phone", "Role", "Verifications", "Check-ins", "Tickets resolved"],
-                ...(staff.data ?? []).map((s) => [
-                  s.name, s.email, s.phone, s.role,
-                  workloadMap.get(s.id)?.verifications ?? 0,
-                  workloadMap.get(s.id)?.walkIns ?? 0,
-                  workloadMap.get(s.id)?.tickets ?? 0,
-                ]),
-              ])
-            }
-          >
-            Export
-          </NeoButton>
+          <div className="flex gap-2">
+            {canManageStaff ? (
+              <NeoButton size="sm" variant="primary" icon={<Plus />} onClick={() => { setCreateError(null); setCreateOpen(true); }}>
+                Add staff
+              </NeoButton>
+            ) : null}
+            <NeoButton
+              size="sm"
+              variant="secondary"
+              icon={<Download />}
+              onClick={() =>
+                downloadCsv("team-workload.csv", [
+                  ["Name", "Email", "Phone", "Role", "Verifications", "Check-ins", "Tickets resolved"],
+                  ...(staff.data ?? []).map((s) => [
+                    s.name, s.email, s.phone, s.role,
+                    workloadMap.get(s.id)?.verifications ?? 0,
+                    workloadMap.get(s.id)?.walkIns ?? 0,
+                    workloadMap.get(s.id)?.tickets ?? 0,
+                  ]),
+                ])
+              }
+            >
+              Export
+            </NeoButton>
+          </div>
         }
       />
 
@@ -294,6 +347,50 @@ export function TeamScreen() {
           </NeoCard>
         </div>
       ) : null}
+
+      <NeoModal
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        title="Create staff account"
+        description="The account is email-verified, starts with a temporary password, and must change it before console SSO is enabled."
+        footer={
+          <>
+            <NeoButton variant="ghost" onClick={() => setCreateOpen(false)} disabled={createBusy}>Cancel</NeoButton>
+            <NeoButton
+              variant="primary"
+              loading={createBusy}
+              disabled={!newStaff.name.trim() || !newStaff.email.trim() || !newStaff.phone.trim() || newStaff.temporaryPassword.length < 8 || !getRepo().staff.create}
+              onClick={async () => {
+                const createStaff = getRepo().staff.create;
+                if (!createStaff) return;
+                setCreateBusy(true);
+                setCreateError(null);
+                try {
+                  await createStaff({ ...newStaff, eventId: newStaff.role === "head" ? null : newStaff.eventId || events.data?.[0]?.id || null });
+                  toast.success("Staff account created", "They must change the temporary password before console access.");
+                  setCreateOpen(false);
+                  setNewStaff({ name: "", email: "", phone: "", temporaryPassword: "", role: "desk", eventId: "" });
+                  staff.reload();
+                } catch (err) {
+                  setCreateError(isDataError(err) ? err.message : "Could not create staff account.");
+                } finally {
+                  setCreateBusy(false);
+                }
+              }}
+            >Create account</NeoButton>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <NeoInput label="Full name" value={newStaff.name} onChange={(event) => setNewStaff((current) => ({ ...current, name: event.target.value }))} required />
+          <NeoInput label="Email" type="email" value={newStaff.email} onChange={(event) => setNewStaff((current) => ({ ...current, email: event.target.value }))} required />
+          <NeoInput label="Phone" value={newStaff.phone} onChange={(event) => setNewStaff((current) => ({ ...current, phone: event.target.value }))} required />
+          <NeoInput label="Temporary password" type="password" hint="At least 8 characters" value={newStaff.temporaryPassword} onChange={(event) => setNewStaff((current) => ({ ...current, temporaryPassword: event.target.value }))} required />
+          <NeoSelect label="Initial role" value={newStaff.role} onChange={(event) => setNewStaff((current) => ({ ...current, role: event.target.value as StaffRoleId, eventId: event.target.value === "head" ? "" : current.eventId }))} options={CORE_STAFF_ROLES.map((role) => ({ value: role.id, label: role.label }))} />
+          {newStaff.role !== "head" ? <NeoSelect label="Assigned event" value={newStaff.eventId || events.data?.[0]?.id || ""} onChange={(event) => setNewStaff((current) => ({ ...current, eventId: event.target.value }))} options={(events.data ?? []).map((event) => ({ value: event.id, label: event.title }))} /> : null}
+          {createError ? <p className="rounded-neo bg-failed-bg p-2.5 text-[0.78rem] text-failed" role="alert">{createError}</p> : null}
+        </div>
+      </NeoModal>
     </Page>
   );
 }

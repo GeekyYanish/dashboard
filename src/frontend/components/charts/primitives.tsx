@@ -133,7 +133,7 @@ export function GridLines({
   return (
     <g aria-hidden>
       {ticks.map((t) => (
-        <g key={t.label}>
+        <g key={`${t.label}-${t.y}`}>
           <line
             x1={padLeft}
             x2={width}
@@ -174,5 +174,5 @@ export function compactNum(n: number): string {
   if (Math.abs(n) >= 1e7) return `${(n / 1e7).toFixed(1)}Cr`;
   if (Math.abs(n) >= 1e5) return `${(n / 1e5).toFixed(1)}L`;
   if (Math.abs(n) >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k`;
-  return String(Math.round(n));
+  return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, "");
 }

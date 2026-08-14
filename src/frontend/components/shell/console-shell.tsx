@@ -7,8 +7,10 @@ import { CommandPalette } from "./command-palette";
 import { ShortcutsOverlay } from "./shortcuts-overlay";
 import { TooltipProvider } from "@/frontend/components/neo";
 import { useAsync, useMounted } from "@/frontend/hooks/use-async";
+import { useAuth } from "@/frontend/hooks/use-auth";
 import { getRepo } from "@/lib/data";
 import { NeoSkeleton } from "@/frontend/components/neo";
+import { selectedEventId, setSelectedEventId } from "@/lib/data/http/scope";
 
 /**
  * The authenticated console frame. `/desk` and `/live` deliberately do NOT use
@@ -20,12 +22,52 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [scope, setScope] = useState<string | undefined>();
+  const { session, role } = useAuth();
 
   // getRepo() is called INSIDE the callback, not at render time. The callback
   // only runs from an effect, so the ~14k-record seed is never built during SSR.
   const stats = useAsync(() => getRepo().overview.stats(), []);
   const actor = useAsync(() => getRepo().admin.actor(), []);
   const announcements = useAsync(() => getRepo().overview.announcements(), []);
+  const events = useAsync(() => getRepo().events.list(), []);
+
+  useEffect(() => {
+    setScope(selectedEventId());
+    const onScopeChange = () => setScope(selectedEventId());
+    window.addEventListener("registration-console:event-scope", onScopeChange);
+    return () => window.removeEventListener("registration-console:event-scope", onScopeChange);
+  }, []);
+
+  // A non-global staff member starts on their first assigned event. ADMINs may
+  // keep the global "All events" view or narrow it with the selector.
+  useEffect(() => {
+    if (!session || !events.data?.length) return;
+    const isAdmin = session.role === "head" || session.roles?.includes("head");
+    const current = selectedEventId();
+    if (isAdmin) {
+      if (current && !events.data.some((event) => event.id === current)) setSelectedEventId(undefined);
+      return;
+    }
+    if (!current || !events.data.some((event) => event.id === current)) setSelectedEventId(events.data[0].id);
+  }, [session, events.data]);
+
+  const refreshLiveData = () => {
+    stats.reload();
+    announcements.reload();
+    events.reload();
+    window.dispatchEvent(new CustomEvent("aurora:reload"));
+  };
+
+  useEffect(() => {
+    const timer = window.setInterval(refreshLiveData, 15_000);
+    const onFocus = () => refreshLiveData();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [stats.reload, announcements.reload, events.reload]);
 
   // Global shortcut layer. Everything here is inert while a text field has
   // focus — an operator typing "k" into a search box must not open a modal.
@@ -62,6 +104,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
       <div className="flex min-h-dvh">
         <Sidebar
           stats={stats.data}
+            roles={role ? [role] : []}
           mobileOpen={mobileOpen}
           onMobileClose={() => setMobileOpen(false)}
         />
@@ -72,11 +115,12 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
             onOpenPalette={() => setPaletteOpen(true)}
             actor={actor.data ?? undefined}
             announcements={announcements.data}
-            onReload={() => {
-              stats.reload();
-              announcements.reload();
-              window.dispatchEvent(new CustomEvent("aurora:reload"));
-            }}
+            events={events.data}
+            selectedEventId={scope}
+            isAdmin={role === "head"}
+            role={role ?? undefined}
+            onSelectEvent={setSelectedEventId}
+            onReload={refreshLiveData}
           />
 
           <main className="min-w-0 flex-1 px-3 py-5 sm:px-5 lg:px-7">

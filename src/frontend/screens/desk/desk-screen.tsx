@@ -42,10 +42,11 @@ import { useLookups } from "@/frontend/hooks/use-lookups";
 import { useOfflineQueue, type QueuedOp } from "@/frontend/hooks/use-offline-queue";
 import { usePrefs } from "@/frontend/prefs";
 import { getRepo } from "@/lib/data";
-import { isDataError, type Participant } from "@/lib/data/types";
+import { isDataError, type FestEvent, type Participant, type Team } from "@/lib/data/types";
 import { CATEGORIES, FEES, FEST, PAYMENT_METHODS, inr } from "@/lib/fest.config";
 import { titleCase } from "@/frontend/status";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/frontend/hooks/use-auth";
 
 /**
  * THE DESK.
@@ -57,6 +58,8 @@ import { cn } from "@/lib/utils";
  */
 export function DeskScreen() {
   const { theme, toggleTheme } = usePrefs();
+  const { role: actorRole } = useAuth();
+  const isScanner = actorRole === "desk";
   const lookups = useLookups();
   const [query, setQuery] = useState("");
   const dQuery = useDebounced(query, 160);
@@ -65,6 +68,8 @@ export function DeskScreen() {
   const [payOpen, setPayOpen] = useState(false);
   const [kitOpen, setKitOpen] = useState(false);
   const [printFor, setPrintFor] = useState<Participant | null>(null);
+  const [registrationOpen, setRegistrationOpen] = useState(false);
+  const [registrationEventId, setRegistrationEventId] = useState("");
 
   const shift = useAsync(() => getRepo().desk.currentShift(), []);
   const tokens = useAsync(() => getRepo().desk.tokens(), []);
@@ -91,6 +96,15 @@ export function DeskScreen() {
     () => (selected ? getRepo().registrations.forParticipant(selected.id) : Promise.resolve([])),
     [selected],
   );
+  const events = useAsync(() => getRepo().events.list(), []);
+  const registrationEvent = useMemo(
+    () => events.data?.find((event) => event.id === registrationEventId) ?? null,
+    [events.data, registrationEventId],
+  );
+  const registrationTeams = useAsync(
+    () => (registrationEvent && registrationEvent.maxTeamSize > 1 ? getRepo().teams.list(registrationEvent.id) : Promise.resolve([])),
+    [registrationEvent?.id],
+  );
 
   // Declared before the key handler that calls it — a `const` arrow function
   // referenced above its declaration is a temporal-dead-zone hazard.
@@ -100,35 +114,12 @@ export function DeskScreen() {
     tokens.reload();
   };
 
-  // Function keys. Physical desks are driven by muscle memory.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "F2") {
-        e.preventDefault();
-        setMode("walkin");
-      } else if (e.key === "F3" && selected) {
-        e.preventDefault();
-        setPayOpen(true);
-      } else if (e.key === "F4" && selected) {
-        e.preventDefault();
-        setPrintFor(selected);
-      } else if (e.key === "F8") {
-        e.preventDefault();
-        void issueToken();
-      } else if (e.key === "Escape") {
-        setSelected(null);
-        setMode("search");
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected]);
-
-  const waiting = useMemo(
-    () => (tokens.data ?? []).filter((t) => !t.servedAt).length,
-    [tokens.data],
-  );
+  const openRegistration = () => {
+    if (!selected) return;
+    const nextEvent = events.data?.find((event) => !regs.data?.some((registration) => registration.eventId === event.id)) ?? events.data?.[0];
+    setRegistrationEventId(nextEvent?.id ?? "");
+    setRegistrationOpen(true);
+  };
 
   const checkIn = async () => {
     if (!selected) return;
@@ -148,6 +139,38 @@ export function DeskScreen() {
       toast.error(isDataError(e) ? e.message : "Check-in failed");
     }
   };
+
+  // Function keys. Physical desks are driven by muscle memory.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F2") {
+        e.preventDefault();
+        if (isScanner) openRegistration();
+        else setMode("walkin");
+      } else if (e.key === "F3" && selected) {
+        e.preventDefault();
+        if (isScanner) void checkIn();
+        else setPayOpen(true);
+      } else if (e.key === "F4" && selected) {
+        e.preventDefault();
+        setPrintFor(selected);
+      } else if (e.key === "F8") {
+        e.preventDefault();
+        void issueToken();
+      } else if (e.key === "Escape") {
+        setSelected(null);
+        setMode("search");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, isScanner, events.data, regs.data]);
+
+  const waiting = useMemo(
+    () => (tokens.data ?? []).filter((t) => !t.servedAt).length,
+    [tokens.data],
+  );
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
@@ -208,22 +231,47 @@ export function DeskScreen() {
       </header>
 
       <main className="mx-auto w-full max-w-[1200px] flex-1 p-4 sm:p-6">
+        <div className="mb-4 rounded-neo border border-hairline bg-plane-alt px-3.5 py-2.5 text-[0.76rem] leading-snug text-ink-muted">
+          <span className="font-semibold text-ink">Live registration core:</span> participant search and event
+          registration use the backend. Check-in, badge printing, kit issue, payment collection, and token queue
+          remain isolated legacy desk demos and do not contribute to core dashboard totals.
+        </div>
         {/* Action rail — big keys, F-key labels. */}
         <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-          <DeskKey
-            icon={<UserPlus />}
-            label="New walk-in"
-            hint="F2"
-            active={mode === "walkin"}
-            onClick={() => setMode("walkin")}
-          />
-          <DeskKey
-            icon={<Banknote />}
-            label="Collect payment"
-            hint="F3"
-            disabled={!selected}
-            onClick={() => setPayOpen(true)}
-          />
+          {isScanner ? (
+            <DeskKey
+              icon={<UserPlus />}
+              label="Register event"
+              hint="F2"
+              disabled={!selected || (flags.data?.amountPaid ?? 0) <= 0}
+              onClick={openRegistration}
+            />
+          ) : (
+            <DeskKey
+              icon={<UserPlus />}
+              label="New walk-in"
+              hint="F2"
+              active={mode === "walkin"}
+              onClick={() => setMode("walkin")}
+            />
+          )}
+          {!isScanner ? (
+            <DeskKey
+              icon={<Banknote />}
+              label="Collect payment"
+              hint="F3"
+              disabled={!selected}
+              onClick={() => setPayOpen(true)}
+            />
+          ) : (
+            <DeskKey
+              icon={<Check />}
+              label="Check in"
+              hint="F3"
+              disabled={!selected}
+              onClick={checkIn}
+            />
+          )}
           <DeskKey
             icon={<Printer />}
             label="Print badge"
@@ -234,7 +282,7 @@ export function DeskScreen() {
           <DeskKey icon={<Ticket />} label="Issue token" hint="F8" onClick={issueToken} />
         </div>
 
-        {mode === "walkin" ? (
+        {mode === "walkin" && !isScanner ? (
           <WalkInForm
             onCancel={() => setMode("search")}
             onCreated={(p) => {
@@ -291,12 +339,12 @@ export function DeskScreen() {
                     <EmptyState
                       icon={<Search />}
                       title="No match"
-                      hint="Register them as a walk-in instead."
-                      action={
+                      hint={isScanner ? "Only existing participants with a verified festival pass can be registered here." : "Register them as a walk-in instead."}
+                      action={isScanner ? undefined : (
                         <NeoButton variant="primary" icon={<UserPlus />} onClick={() => setMode("walkin")}>
                           New walk-in
                         </NeoButton>
-                      }
+                      )}
                     />
                   ) : (
                     <div className="px-2 py-10 text-center">
@@ -305,7 +353,7 @@ export function DeskScreen() {
                         Start typing, or scan a badge.
                       </p>
                       <p className="mt-3 flex items-center justify-center gap-2 text-[0.75rem] text-ink-faint">
-                        <Kbd>F2</Kbd> walk-in <Kbd>F3</Kbd> payment <Kbd>F4</Kbd> badge{" "}
+                        <Kbd>F2</Kbd> {isScanner ? "register" : "walk-in"} <Kbd>F3</Kbd> {isScanner ? "check-in" : "payment"} <Kbd>F4</Kbd> badge{" "}
                         <Kbd>F8</Kbd> token
                       </p>
                     </div>
@@ -372,17 +420,30 @@ export function DeskScreen() {
                     <NeoButton variant="secondary" icon={<Check />} onClick={checkIn}>
                       Check in
                     </NeoButton>
-                    <NeoButton variant="secondary" icon={<Package />} onClick={() => setKitOpen(true)}>
-                      Issue kit
-                    </NeoButton>
-                    <NeoButton
-                      variant="secondary"
-                      icon={<Banknote />}
-                      onClick={() => setPayOpen(true)}
-                      disabled={!flags.data?.amountDue}
-                    >
-                      Collect {flags.data ? inr(flags.data.amountDue) : ""}
-                    </NeoButton>
+                    {isScanner ? (
+                      <NeoButton
+                        variant="primary"
+                        icon={<UserPlus />}
+                        onClick={openRegistration}
+                        disabled={!flags.data || flags.data.amountPaid <= 0}
+                      >
+                        Register event
+                      </NeoButton>
+                    ) : (
+                      <NeoButton variant="secondary" icon={<Package />} onClick={() => setKitOpen(true)}>
+                        Issue kit
+                      </NeoButton>
+                    )}
+                    {!isScanner ? (
+                      <NeoButton
+                        variant="secondary"
+                        icon={<Banknote />}
+                        onClick={() => setPayOpen(true)}
+                        disabled={!flags.data?.amountDue}
+                      >
+                        Collect {flags.data ? inr(flags.data.amountDue) : ""}
+                      </NeoButton>
+                    ) : null}
                     <NeoButton
                       variant="primary"
                       icon={<Printer />}
@@ -400,7 +461,7 @@ export function DeskScreen() {
                   <EmptyState
                     icon={<UserPlus />}
                     title="Nobody selected"
-                    hint="Search for a participant, or press F2 to register a walk-in."
+                    hint={isScanner ? "Search for an existing participant with a verified pass." : "Search for a participant, or press F2 to register a walk-in."}
                   />
                 </NeoCard.Body>
               </NeoCard>
@@ -408,6 +469,19 @@ export function DeskScreen() {
           </div>
         )}
       </main>
+
+      <DeskRegistrationModal
+        open={registrationOpen}
+        onOpenChange={setRegistrationOpen}
+        participant={selected}
+        paid={Boolean(flags.data && flags.data.amountPaid > 0)}
+        events={events.data ?? []}
+        eventId={registrationEventId}
+        onEventChange={setRegistrationEventId}
+        teams={registrationTeams.data ?? []}
+        teamsLoading={registrationTeams.loading}
+        onDone={() => regs.reload()}
+      />
 
       <CollectPaymentModal
         open={payOpen}
@@ -522,6 +596,117 @@ function BigStat({ label, value, good }: { label: string; value: string; good: b
         {value}
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+
+function DeskRegistrationModal({
+  open,
+  onOpenChange,
+  participant,
+  paid,
+  events,
+  eventId,
+  onEventChange,
+  teams,
+  teamsLoading,
+  onDone,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  participant: Participant | null;
+  paid: boolean;
+  events: FestEvent[];
+  eventId: string;
+  onEventChange: (eventId: string) => void;
+  teams: Team[];
+  teamsLoading: boolean;
+  onDone: () => void;
+}) {
+  const [teamId, setTeamId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const event = events.find((candidate) => candidate.id === eventId);
+  const teamRequired = Boolean(event && event.maxTeamSize > 1);
+  const participantTeams = teams.filter((team) => participant && team.memberIds.includes(participant.id));
+
+  const submit = async () => {
+    if (!participant || !event || !paid || (teamRequired && !teamId)) return;
+    setBusy(true);
+    try {
+      await getRepo().registrations.create({
+        participantId: participant.id,
+        eventId: event.id,
+        teamId: teamRequired ? teamId : null,
+        source: "on_spot",
+      });
+      toast.success("Registration created", `${participant.fullName} · ${event.title}`);
+      onOpenChange(false);
+      onDone();
+    } catch (error) {
+      toast.error(isDataError(error) ? error.message : "Could not create registration", isDataError(error) ? error.code : undefined);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <NeoModal
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Register participant for an event"
+      description="Only an existing participant with a verified festival pass can be registered at this desk."
+      footer={(
+        <>
+          <NeoButton variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</NeoButton>
+          <NeoButton
+            variant="primary"
+            loading={busy}
+            disabled={!participant || !paid || !event || (teamRequired && !teamId) || teamsLoading}
+            onClick={submit}
+          >
+            Create registration
+          </NeoButton>
+        </>
+      )}
+    >
+      <div className="space-y-3">
+        <div className="neo-inset-sm rounded-neo p-3">
+          <div className="engraved mb-1 !text-[0.58rem]">Participant</div>
+          <div className="font-semibold text-ink">{participant?.fullName ?? "Select a participant first"}</div>
+          <div className="mt-1 font-mono text-[0.72rem] text-ink-muted">{participant?.code ?? "—"}</div>
+          {!paid ? <p className="mt-2 text-[0.76rem] text-failed">Payment is not verified, so registration is blocked.</p> : null}
+        </div>
+        <NeoSelect
+          label="Event"
+          value={eventId}
+          onChange={(eventChange) => {
+            onEventChange(eventChange.target.value);
+            setTeamId("");
+          }}
+          options={events.map((candidate) => ({ value: candidate.id, label: candidate.title }))}
+          required
+        />
+        {teamRequired ? (
+          participantTeams.length ? (
+            <NeoSelect
+              label="Team"
+              value={teamId}
+              onChange={(eventChange) => setTeamId(eventChange.target.value)}
+              options={participantTeams.map((team) => ({ value: team.id, label: `${team.name} · ${team.memberIds.length} members` }))}
+              required
+            />
+          ) : (
+            <p className="rounded-neo bg-pending-bg p-3 text-[0.78rem] text-ink-soft">
+              This is a team event, but the participant is not in a team for it. They must join a team on the website before the desk can register them.
+            </p>
+          )
+        ) : null}
+        <p className="text-[0.72rem] leading-relaxed text-ink-muted">
+          Duplicate, closed-event, capacity, and team-size rules are enforced by the backend transaction.
+        </p>
+      </div>
+    </NeoModal>
   );
 }
 

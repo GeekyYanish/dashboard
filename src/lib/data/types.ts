@@ -115,6 +115,15 @@ export interface Registration {
   eventId: string;
   teamId: string | null;
   status: RegistrationStatus;
+  /** Participant festival-pass gate as reported by the backend. */
+  paymentStatus?: "pending" | "verified" | "override" | "rejected" | string | null;
+  overrideActorId?: string | null;
+  overrideReason?: string | null;
+  overrideAt?: string | null;
+  eventTitle?: string | null;
+  participantName?: string | null;
+  participantEmail?: string | null;
+  participantCode?: string | null;
   /** Position in the waitlist queue; null unless status === "waitlisted". */
   waitlistPosition: number | null;
   feeInr: number;
@@ -172,7 +181,7 @@ export interface Payment {
   participantId: string;
   /** Registrations this payment settles. A participant pays once for many events. */
   registrationIds: string[];
-  method: PaymentMethodId;
+  method: PaymentMethodId | null;
   /** Bank/UPI reference. UNIQUE across the system — see DataError UTR_ALREADY_USED. */
   utr: string | null;
   amount: number;
@@ -500,6 +509,7 @@ export interface StaffMember {
   /** Reset on success; drives the sign-in lockout. */
   failedAttempts: number;
   lockedUntil: string | null;
+  assignments?: { id: string; role: StaffRoleId; eventId: string | null }[];
 }
 
 export interface AuditEvent {

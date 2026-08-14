@@ -36,6 +36,8 @@ export interface Session {
   name: string;
   email: string;
   role: StaffRoleId;
+  roles?: StaffRoleId[];
+  assignments?: { role: StaffRoleId; eventId: string | null }[];
   issuedAt: string;
   expiresAt: string;
   /** Blocks everything except /login/set-password until cleared. */

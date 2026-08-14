@@ -30,7 +30,7 @@ import {
   EmptyState,
   NeoAvatar,
 } from "@/frontend/components/neo";
-import { AreaChart, DonutChart, BarChart, Sparkline, Funnel, HeatmapGrid } from "@/frontend/components/charts";
+import { AreaChart, DonutChart, BarChart, Sparkline, Funnel } from "@/frontend/components/charts";
 import { useAsync } from "@/frontend/hooks/use-async";
 import { getRepo } from "@/lib/data";
 import { FEST, inr, PAYMENT_METHODS, TRACKS } from "@/lib/fest.config";
@@ -43,8 +43,6 @@ export function OverviewScreen() {
   const stats = useAsync(() => getRepo().overview.stats(), []);
   const attention = useAsync(() => getRepo().overview.attention(), []);
   const activity = useAsync(() => getRepo().overview.activity(12), []);
-  const events = useAsync(() => getRepo().events.list(), []);
-  const eventStats = useAsync(() => getRepo().events.allStats(), []);
 
   const s = stats.data;
 
@@ -55,25 +53,6 @@ export function OverviewScreen() {
       revenue: s.series.map((d) => d.revenue),
     };
   }, [s]);
-
-  const heatCells = useMemo(() => {
-    if (!events.data || !eventStats.data) return [];
-    const byId = new Map(eventStats.data.map((e) => [e.eventId, e]));
-    return events.data
-      .filter((e) => e.status !== "cancelled" && e.capacity != null)
-      .map((e) => {
-        const st = byId.get(e.id);
-        const filled = (st?.confirmedCount ?? 0) + (st?.pendingCount ?? 0);
-        return {
-          id: e.id,
-          label: e.title,
-          value: e.capacity ? Math.min(100, (filled / e.capacity) * 100) : 0,
-          hint: `${filled} of ${e.capacity} seats · ${st?.waitlistCount ?? 0} waitlisted`,
-        };
-      })
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 24);
-  }, [events.data, eventStats.data]);
 
   if (stats.loading || !s) return <OverviewSkeleton />;
 
@@ -351,25 +330,47 @@ export function OverviewScreen() {
         </NeoCard>
       </div>
 
-      {/* ---- Capacity + activity ------------------------------------------- */}
+      {/* ---- Collection progress + activity --------------------------------- */}
       <div className="grid gap-4 xl:grid-cols-3">
         <NeoCard className="xl:col-span-2">
           <NeoCard.Header
-            eyebrow="Capacity"
-            title="Event fill rate"
-            subtitle="Stronger colour means closer to full. Click any event to open its roster."
+            eyebrow="Finance"
+            title="Collection progress"
+            subtitle="Verified collections against what every live registration should bring in."
           />
-          <NeoCard.Raw>
-            {heatCells.length ? (
-              <HeatmapGrid
-                cells={heatCells}
-                legendLow="Empty"
-                legendHigh="At capacity"
-                onCellClick={(id) => router.push(`/events?focus=${id}`)}
-              />
-            ) : (
-              <NeoSkeleton className="h-40" />
-            )}
+          <NeoCard.Raw className="space-y-4">
+            <NeoProgress
+              value={s.revenueCollected}
+              max={s.revenueExpected}
+              tone="paid"
+              label={`${inr(s.revenueCollected)} of ${inr(s.revenueExpected)}`}
+              showValue
+            />
+            {/* Stacked, not side by side — three money figures read faster down
+                a column than across a row, because the eye compares magnitudes
+                on a shared left edge. */}
+            <div className="space-y-2">
+              {[
+                { label: "Collected", value: s.revenueCollected, tone: "paid" as const },
+                { label: "Outstanding", value: s.outstandingDues, tone: "pending" as const },
+                {
+                  label: "In verification",
+                  value: s.verificationQueueDepth,
+                  tone: "waitlist" as const,
+                  isCount: true,
+                },
+              ].map((b) => (
+                <div
+                  key={b.label}
+                  className="neo-inset-sm flex items-baseline justify-between gap-4 rounded-neo px-3.5 py-2.5"
+                >
+                  <span className="engraved">{b.label}</span>
+                  <span className="tnum font-display text-[1.15rem] font-semibold text-ink">
+                    {b.isCount ? b.value.toLocaleString("en-IN") : inr(b.value)}
+                  </span>
+                </div>
+              ))}
+            </div>
           </NeoCard.Raw>
         </NeoCard>
 
@@ -409,43 +410,6 @@ export function OverviewScreen() {
           </NeoCard.Body>
         </NeoCard>
       </div>
-
-      {/* ---- Collection progress ------------------------------------------- */}
-      <NeoCard>
-        <NeoCard.Header
-          eyebrow="Finance"
-          title="Collection progress"
-          subtitle="Verified collections against what every live registration should bring in."
-        />
-        <NeoCard.Raw className="space-y-4">
-          <NeoProgress
-            value={s.revenueCollected}
-            max={s.revenueExpected}
-            tone="paid"
-            label={`${inr(s.revenueCollected)} of ${inr(s.revenueExpected)}`}
-            showValue
-          />
-          <div className="grid gap-3 sm:grid-cols-3">
-            {[
-              { label: "Collected", value: s.revenueCollected, tone: "paid" as const },
-              { label: "Outstanding", value: s.outstandingDues, tone: "pending" as const },
-              {
-                label: "In verification",
-                value: s.verificationQueueDepth,
-                tone: "waitlist" as const,
-                isCount: true,
-              },
-            ].map((b) => (
-              <div key={b.label} className="neo-inset-sm rounded-neo p-3">
-                <div className="engraved mb-1.5">{b.label}</div>
-                <div className="tnum font-display text-[1.25rem] font-semibold text-ink">
-                  {b.isCount ? b.value.toLocaleString("en-IN") : inr(b.value)}
-                </div>
-              </div>
-            ))}
-          </div>
-        </NeoCard.Raw>
-      </NeoCard>
     </Page>
   );
 }

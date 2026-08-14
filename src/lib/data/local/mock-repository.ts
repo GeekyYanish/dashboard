@@ -1204,7 +1204,7 @@ export class MockRepository implements Repository {
     list: async (filter?: PaymentFilter): Promise<Payment[]> => {
       let rows = this.d.payments;
       if (filter?.status?.length) rows = rows.filter((p) => filter.status!.includes(p.status));
-      if (filter?.method?.length) rows = rows.filter((p) => filter.method!.includes(p.method));
+      if (filter?.method?.length) rows = rows.filter((p) => p.method != null && filter.method!.includes(p.method));
       if (filter?.minAmount != null) rows = rows.filter((p) => p.amount >= filter.minAmount!);
       if (filter?.maxAmount != null) rows = rows.filter((p) => p.amount <= filter.maxAmount!);
       if (filter?.from) rows = rows.filter((p) => p.submittedAt >= filter.from!);

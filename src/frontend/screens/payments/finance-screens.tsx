@@ -800,7 +800,7 @@ export function FraudScreen() {
             return (
               <NeoCard key={p.id}>
                 <NeoCard.Header
-                  eyebrow={p.utr ? `UTR ${p.utr}` : titleCase(p.method)}
+                  eyebrow={p.utr ? `UTR ${p.utr}` : p.method ? titleCase(p.method) : "Not recorded"}
                   title={who?.fullName ?? "Unknown"}
                   subtitle={`${who?.code ?? ""} · ${lookups.collegeOf(p.participantId)?.shortName ?? ""}`}
                   actions={

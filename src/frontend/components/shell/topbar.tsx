@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import {
   Menu,
   Search,
+  CalendarDays,
   Sun,
   Moon,
   Rows3,
@@ -29,21 +30,32 @@ import { useAuth } from "@/frontend/hooks/use-auth";
 import { useDaysUntil } from "@/frontend/hooks/use-now";
 import { ALL_NAV_ITEMS } from "@/frontend/nav";
 import { FEST, roleById } from "@/lib/fest.config";
+import type { StaffRoleId } from "@/lib/fest.config";
 import { cn, relativeTime } from "@/lib/utils";
 import type { Actor } from "@/lib/data/repository";
-import type { Announcement } from "@/lib/data/types";
+import type { Announcement, FestEvent } from "@/lib/data/types";
 
 export function Topbar({
   onMenu,
   onOpenPalette,
   actor,
   announcements,
+  events,
+  selectedEventId,
+  isAdmin,
+  role,
+  onSelectEvent,
   onReload,
 }: {
   onMenu: () => void;
   onOpenPalette: () => void;
   actor?: Actor;
   announcements?: Announcement[];
+  events?: FestEvent[];
+  selectedEventId?: string;
+  isAdmin?: boolean;
+  role?: StaffRoleId;
+  onSelectEvent?: (eventId: string | undefined) => void;
   onReload?: () => void;
 }) {
   const router = useRouter();
@@ -99,6 +111,26 @@ export function Topbar({
           </span>
           <span className="text-[0.7rem] text-ink-muted">days</span>
         </div>
+
+        {events?.length && onSelectEvent ? (
+          <label className="neo-inset-sm hidden h-9 max-w-[250px] items-center gap-1.5 rounded-neo px-2 sm:flex">
+            <CalendarDays className="size-3.5 shrink-0 text-ink-faint" aria-hidden />
+            <span className="sr-only">Event scope</span>
+            <select
+              aria-label="Event scope"
+              value={selectedEventId ?? (isAdmin ? "" : events[0]?.id ?? "")}
+              onChange={(event) => onSelectEvent(event.target.value || undefined)}
+              className="min-w-0 max-w-[210px] cursor-pointer bg-transparent text-[0.75rem] font-medium text-ink outline-none"
+            >
+              {isAdmin ? <option value="">All events</option> : null}
+              {events.map((event) => (
+                <option key={event.id} value={event.id}>
+                  {event.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
         <button
           onClick={onOpenPalette}
@@ -213,7 +245,7 @@ export function Topbar({
             <div className="px-2.5 py-2">
               <p className="text-[0.85rem] font-semibold text-ink">{actor.name}</p>
               <p className="text-[0.72rem] text-ink-muted">
-                {roleById(actor.role as never)?.label ?? actor.role}
+                {roleById((role ?? actor.role) as never)?.label ?? (role ?? actor.role)}
               </p>
             </div>
             <div className="my-1 h-px bg-engrave" />

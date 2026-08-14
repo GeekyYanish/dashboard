@@ -78,7 +78,7 @@ export function PaymentDrawer({
       <NeoDrawer
         open={!!paymentId}
         onOpenChange={(v) => !v && onClose()}
-        eyebrow={p ? `${titleCase(p.method)} · ${relativeTime(p.submittedAt)}` : undefined}
+        eyebrow={p ? `${p.method ? titleCase(p.method) : "Not recorded"} · ${relativeTime(p.submittedAt)}` : undefined}
         title={who?.fullName ?? "Payment"}
         footer={
           p ? (
@@ -143,7 +143,7 @@ export function PaymentDrawer({
                   {PAYMENT_LABEL[p.status]}
                 </StatusBadge>
                 <StatusBadge tone="info" size="sm" dot={false}>
-                  {PAYMENT_METHODS.find((m) => m.id === p.method)?.label}
+                  {PAYMENT_METHODS.find((m) => m.id === p.method)?.label ?? "Not recorded"}
                 </StatusBadge>
                 {p.fraudFlags.length ? (
                   <StatusBadge tone="failed" size="sm">

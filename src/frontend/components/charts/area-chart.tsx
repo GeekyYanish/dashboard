@@ -87,13 +87,16 @@ export function AreaChart({
     pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
 
   const areaPath = (top: [number, number][], bottom: [number, number][]) =>
-    `${path(top)} L${bottom[bottom.length - 1][0].toFixed(1)},${bottom[bottom.length - 1][1].toFixed(1)} ${bottom
-      .slice()
-      .reverse()
-      .map((p) => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`)
-      .join(" ")} Z`;
+    top.length > 0 && bottom.length > 0
+      ? `${path(top)} L${bottom[bottom.length - 1][0].toFixed(1)},${bottom[bottom.length - 1][1].toFixed(1)} ${bottom
+          .slice()
+          .reverse()
+          .map((p) => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`)
+          .join(" ")} Z`
+      : "";
 
   const onMove = (e: React.MouseEvent) => {
+    if (!labels.length) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const rel = ((e.clientX - rect.left) / rect.width) * W;
     const i = Math.round(((rel - PAD_L) / plotW) * (labels.length - 1));

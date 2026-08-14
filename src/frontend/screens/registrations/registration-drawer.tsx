@@ -9,6 +9,7 @@ import {
   Mail,
   GraduationCap,
   ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
 import {
   NeoDrawer,
@@ -19,6 +20,8 @@ import {
   NeoAvatar,
   NeoTabs,
   NeoSkeleton,
+  NeoModal,
+  NeoInput,
   toast,
 } from "@/frontend/components/neo";
 import { useAsync } from "@/frontend/hooks/use-async";
@@ -35,6 +38,7 @@ import {
   titleCase,
 } from "@/frontend/status";
 import { relativeTime } from "@/lib/utils";
+import { useAuth } from "@/frontend/hooks/use-auth";
 
 type Tab = "overview" | "payments" | "documents" | "activity";
 
@@ -54,6 +58,10 @@ export function RegistrationDrawer({
 }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [busy, setBusy] = useState(false);
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
+  const { role } = useAuth();
+  const canManageRegistration = role === "head" || role === "coordinator";
   const lookups = useLookups();
 
   const reg = useAsync(
@@ -107,15 +115,27 @@ export function RegistrationDrawer({
   };
 
   return (
-    <NeoDrawer
+    <>
+      <NeoDrawer
       open={!!registrationId}
       onOpenChange={(v) => !v && onClose()}
       width="lg"
       eyebrow={r ? `${r.code} · ${event?.title ?? ""}` : undefined}
       title={p?.fullName ?? "Registration"}
       footer={
-        r ? (
+        r && canManageRegistration ? (
           <>
+            {role === "head" && r.paymentStatus !== "verified" && r.paymentStatus !== "override" && getRepo().registrations.overridePayment ? (
+              <NeoButton
+                size="sm"
+                variant="secondary"
+                icon={<ShieldCheck />}
+                onClick={() => setOverrideOpen(true)}
+                disabled={busy}
+              >
+                Override payment gate
+              </NeoButton>
+            ) : null}
             <NeoButton
               size="sm"
               variant="secondary"
@@ -259,6 +279,9 @@ export function RegistrationDrawer({
                   <KeyValue label="Event" value={event?.title ?? "—"} />
                   <KeyValue label="Venue" value={event?.venue ?? "—"} />
                   <KeyValue label="Fee" value={inr(r.feeInr)} />
+                  <KeyValue label="Payment gate" value={titleCase(r.paymentStatus ?? "unpaid")} />
+                  {r.overrideReason ? <KeyValue label="Override reason" value={r.overrideReason} /> : null}
+                  {r.overrideAt ? <KeyValue label="Override time" value={relativeTime(r.overrideAt)} /> : null}
                   <KeyValue label="Source" value={titleCase(r.source)} />
                   <KeyValue label="Registered" value={relativeTime(r.registeredAt)} />
                   {r.confirmedAt ? (
@@ -325,7 +348,7 @@ export function RegistrationDrawer({
                       </StatusBadge>
                     </div>
                     <dl className="divide-y divide-hairline">
-                      <KeyValue label="Method" value={titleCase(pay.method)} />
+                      <KeyValue label="Method" value={pay.method ? titleCase(pay.method) : "Not recorded"} />
                       {pay.utr ? <KeyValue label="UTR" value={pay.utr} mono /> : null}
                       {pay.invoiceSerial ? (
                         <KeyValue label="Invoice" value={pay.invoiceSerial} mono />
@@ -413,7 +436,50 @@ export function RegistrationDrawer({
           ) : null}
         </div>
       )}
-    </NeoDrawer>
+      </NeoDrawer>
+
+    <NeoModal
+      open={overrideOpen}
+      onOpenChange={setOverrideOpen}
+      title="Override payment gate"
+      description="This applies only to this registration. It does not verify the participant's global festival pass. A reason is required and will be audited."
+      footer={
+        <>
+          <NeoButton variant="ghost" onClick={() => setOverrideOpen(false)} disabled={busy}>
+            Cancel
+          </NeoButton>
+          <NeoButton
+            variant="primary"
+            icon={<ShieldCheck />}
+            loading={busy}
+            disabled={overrideReason.trim().length < 3}
+            onClick={async () => {
+              if (!r) return;
+              const override = getRepo().registrations.overridePayment;
+              if (!override) {
+                toast.error("Payment overrides are unavailable in this repository.");
+                return;
+              }
+              setOverrideOpen(false);
+              await act(() => override(r.id, overrideReason.trim()), "Payment gate overridden");
+              setOverrideReason("");
+            }}
+          >
+            Apply override
+          </NeoButton>
+        </>
+      }
+    >
+      <NeoInput
+        label="Reason"
+        value={overrideReason}
+        onChange={(event) => setOverrideReason(event.target.value)}
+        placeholder="Why is this registration being overridden?"
+        hint="Minimum 3 characters."
+        autoFocus
+      />
+      </NeoModal>
+    </>
   );
 }
 

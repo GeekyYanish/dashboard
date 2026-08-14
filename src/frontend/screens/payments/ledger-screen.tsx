@@ -124,7 +124,7 @@ export function LedgerScreen() {
       key: "method",
       header: "Method",
       width: "104px",
-      sortValue: (p) => p.method,
+      sortValue: (p) => p.method ?? "",
       cell: (p) => (
         <span className="text-[0.78rem] text-ink-soft">
           {PAYMENT_METHODS.find((m) => m.id === p.method)?.label ?? p.method}

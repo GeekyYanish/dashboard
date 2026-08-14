@@ -37,6 +37,7 @@ import {
   titleCase,
 } from "@/frontend/status";
 import { downloadCsv, relativeTime } from "@/lib/utils";
+import { useAuth } from "@/frontend/hooks/use-auth";
 
 export function ParticipantsScreen() {
   const params = useSearchParams();
@@ -259,6 +260,8 @@ function ParticipantDrawer({
   onChanged: () => void;
 }) {
   const lookups = useLookups();
+  const { role } = useAuth();
+  const canExportPersonalData = role === "head";
   const [tab, setTab] = useState<Tab>("profile");
   const [eraseOpen, setEraseOpen] = useState(false);
 
@@ -312,7 +315,7 @@ function ParticipantDrawer({
         eyebrow={p?.code}
         title={p?.fullName ?? "Participant"}
         footer={
-          p ? (
+          p && canExportPersonalData ? (
             <>
               <NeoButton
                 size="sm"
@@ -496,7 +499,7 @@ function ParticipantDrawer({
                       </StatusBadge>
                     </div>
                     <p className="mt-1 font-mono text-[0.72rem] text-ink-muted">
-                      {titleCase(pay.method)}
+                      {pay.method ? titleCase(pay.method) : "Not recorded"}
                       {pay.utr ? ` · ${pay.utr}` : ""}
                       {pay.invoiceSerial ? ` · ${pay.invoiceSerial}` : ""}
                     </p>

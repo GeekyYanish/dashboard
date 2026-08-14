@@ -9,6 +9,16 @@ import { FEST } from "@/lib/fest.config";
 import { NeoTooltip, NeoIconButton } from "@/frontend/components/neo";
 import { PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import type { OverviewStats } from "@/lib/data/types";
+import type { StaffRoleId } from "@/lib/fest.config";
+
+const ORGANIZER_PATHS = ["/", "/registrations", "/participants", "/teams", "/events", "/checkin", "/live", "/reports", "/audit"];
+const SCANNER_PATHS = ["/", "/registrations", "/participants", "/events", "/desk", "/checkin", "/live"];
+
+function canSeePath(href: string, roles: StaffRoleId[]) {
+  if (!roles.length || roles.includes("head")) return true;
+  const paths = roles.includes("coordinator") ? ORGANIZER_PATHS : SCANNER_PATHS;
+  return paths.some((path) => path === "/" ? href === "/" : href === path || href.startsWith(`${path}/`));
+}
 
 /**
  * The sidebar is where the neumorphism is most literal — a machined control
@@ -17,10 +27,12 @@ import type { OverviewStats } from "@/lib/data/types";
  */
 export function Sidebar({
   stats,
+  roles = [],
   mobileOpen,
   onMobileClose,
 }: {
   stats?: OverviewStats;
+  roles?: StaffRoleId[];
   mobileOpen: boolean;
   onMobileClose: () => void;
 }) {
@@ -109,6 +121,7 @@ export function Sidebar({
                     ) : null}
                   </Link>
                 );
+                if (!canSeePath(item.href, roles)) return null;
                 return (
                   <li key={item.href}>
                     {collapsed ? (

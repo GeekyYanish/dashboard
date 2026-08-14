@@ -36,10 +36,13 @@ import { isDataError, type Registration } from "@/lib/data/types";
 import { CATEGORIES, TRACKS, inr } from "@/lib/fest.config";
 import { REGISTRATION_LABEL, REGISTRATION_TONE, titleCase } from "@/frontend/status";
 import { downloadCsv, relativeTime } from "@/lib/utils";
+import { useAuth } from "@/frontend/hooks/use-auth";
 
 const STATUSES = ["pending", "confirmed", "waitlisted", "cancelled", "rejected"] as const;
 
 export function RegistrationsScreen() {
+  const { role } = useAuth();
+  const canManageRegistrations = role === "head" || role === "coordinator";
   const lookups = useLookups();
   const [search, setSearch] = useState("");
   const dSearch = useDebounced(search, 220);
@@ -66,19 +69,12 @@ export function RegistrationsScreen() {
   const rows = useAsync(() => getRepo().registrations.list(filter), [filter]);
   const all = useAsync(() => getRepo().registrations.list(), []);
   const views = useAsync(() => getRepo().views.list("registrations"), []);
-  const payments = useAsync(() => getRepo().payments.list(), []);
-
   /** Payment state per registration — the column operators scan for first. */
   const payByReg = useMemo(() => {
     const m = new Map<string, string>();
-    for (const p of payments.data ?? [])
-      for (const rid of p.registrationIds) {
-        // Verified wins over pending if a registration is covered twice.
-        if (m.get(rid) === "verified") continue;
-        m.set(rid, p.status);
-      }
+    for (const registration of all.data ?? []) m.set(registration.id, registration.paymentStatus ?? "unpaid");
     return m;
-  }, [payments.data]);
+  }, [all.data]);
 
   const facets: Facet[] = useMemo(
     () => [
@@ -295,11 +291,13 @@ export function RegistrationsScreen() {
             <NeoButton size="sm" variant="secondary" icon={<Download />} onClick={exportCsv}>
               Export
             </NeoButton>
-            <Link href="/registrations/import">
-              <NeoButton size="sm" variant="secondary" icon={<Upload />}>
-                Import CSV
-              </NeoButton>
-            </Link>
+            {canManageRegistrations ? (
+              <Link href="/registrations/import">
+                <NeoButton size="sm" variant="secondary" icon={<Upload />}>
+                  Import CSV
+                </NeoButton>
+              </Link>
+            ) : null}
             <Link href="/desk">
               <NeoButton size="sm" variant="primary" icon={<Plus />}>
                 New registration
@@ -369,76 +367,78 @@ export function RegistrationsScreen() {
         </NeoCard.Body>
       </NeoCard>
 
-      <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
-        <NeoButton
-          size="sm"
-          variant="secondary"
-          icon={<CheckCheck />}
-          loading={busy}
-          onClick={() =>
-            bulk(
-              () => getRepo().registrations.bulkSetStatus([...selected], "confirmed"),
-              `Confirmed ${selected.size} registrations`,
-            )
-          }
-        >
-          Confirm
-        </NeoButton>
-        <NeoButton
-          size="sm"
-          variant="secondary"
-          icon={<ArrowUpFromLine />}
-          loading={busy}
-          onClick={() =>
-            bulk(
-              () => getRepo().registrations.bulkSetStatus([...selected], "waitlisted"),
-              `Moved ${selected.size} to the waitlist`,
-            )
-          }
-        >
-          Waitlist
-        </NeoButton>
-        <NeoButton
-          size="sm"
-          variant="secondary"
-          icon={<Send />}
-          onClick={() => {
-            toast.info(
-              "Audience staged",
-              `${selected.size} participants queued in Communications.`,
-            );
-          }}
-        >
-          Remind
-        </NeoButton>
-        <NeoButton
-          size="sm"
-          variant="secondary"
-          icon={<XCircle />}
-          loading={busy}
-          onClick={() =>
-            bulk(
-              () => getRepo().registrations.bulkSetStatus([...selected], "rejected", "bulk_reject"),
-              `Rejected ${selected.size} registrations`,
-            )
-          }
-        >
-          Reject
-        </NeoButton>
-        <NeoButton
-          size="sm"
-          variant="danger"
-          icon={<Ban />}
-          loading={busy}
-          onClick={() =>
-            bulk(async () => {
-              for (const id of selected) await getRepo().registrations.cancel(id, "withdrawal");
-            }, `Cancelled ${selected.size} registrations — waitlisters promoted`)
-          }
-        >
-          Cancel
-        </NeoButton>
-      </BulkBar>
+      {canManageRegistrations ? (
+        <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
+          <NeoButton
+            size="sm"
+            variant="secondary"
+            icon={<CheckCheck />}
+            loading={busy}
+            onClick={() =>
+              bulk(
+                () => getRepo().registrations.bulkSetStatus([...selected], "confirmed"),
+                `Confirmed ${selected.size} registrations`,
+              )
+            }
+          >
+            Confirm
+          </NeoButton>
+          <NeoButton
+            size="sm"
+            variant="secondary"
+            icon={<ArrowUpFromLine />}
+            loading={busy}
+            onClick={() =>
+              bulk(
+                () => getRepo().registrations.bulkSetStatus([...selected], "waitlisted"),
+                `Moved ${selected.size} to the waitlist`,
+              )
+            }
+          >
+            Waitlist
+          </NeoButton>
+          <NeoButton
+            size="sm"
+            variant="secondary"
+            icon={<Send />}
+            onClick={() => {
+              toast.info(
+                "Audience staged",
+                `${selected.size} participants queued in Communications.`,
+              );
+            }}
+          >
+            Remind
+          </NeoButton>
+          <NeoButton
+            size="sm"
+            variant="secondary"
+            icon={<XCircle />}
+            loading={busy}
+            onClick={() =>
+              bulk(
+                () => getRepo().registrations.bulkSetStatus([...selected], "rejected", "bulk_reject"),
+                `Rejected ${selected.size} registrations`,
+              )
+            }
+          >
+            Reject
+          </NeoButton>
+          <NeoButton
+            size="sm"
+            variant="danger"
+            icon={<Ban />}
+            loading={busy}
+            onClick={() =>
+              bulk(async () => {
+                for (const id of selected) await getRepo().registrations.cancel(id, "withdrawal");
+              }, `Cancelled ${selected.size} registrations — waitlisters promoted`)
+            }
+          >
+            Cancel
+          </NeoButton>
+        </BulkBar>
+      ) : null}
 
       <RegistrationDrawer
         registrationId={openId}
@@ -446,7 +446,6 @@ export function RegistrationsScreen() {
         onChanged={() => {
           rows.reload();
           all.reload();
-          payments.reload();
         }}
       />
     </Page>

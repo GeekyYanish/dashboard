@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { ExternalLink, LogIn, ShieldCheck } from "lucide-react";
-import { NeoButton, NeoCard } from "@/frontend/components/neo";
+import { useMemo, useState } from "react";
+import { ExternalLink, KeyRound, LogIn, Mail, ShieldAlert, ShieldCheck } from "lucide-react";
+import { NeoButton, NeoCard, NeoInput } from "@/frontend/components/neo";
 import { FEST } from "@/lib/fest.config";
 
 function websiteLoginUrl(returnTo: string) {
@@ -17,22 +17,50 @@ function safeReturnTo(value: string | null) {
   return value && value.startsWith("/") && !value.startsWith("//") ? value : "/";
 }
 
-/**
- * The console intentionally has no credential form. Authentication belongs to
- * the Gateways website; staff accounts are exchanged here only through the
- * short-lived, single-use server handoff created after website login.
- */
 export function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const code = new URLSearchParams(window.location.search).get("error");
+    if (code === "handoff_expired") return "That sign-in link expired or was already used. Sign in again.";
+    if (code === "backend_unavailable") return "The registration service is unavailable. Try again shortly.";
+    if (code === "missing_handoff") return "The secure sign-in code was missing. Sign in again.";
+    return null;
+  });
   const returnTo = useMemo(() => {
     if (typeof window === "undefined") return "/";
     return safeReturnTo(new URLSearchParams(window.location.search).get("next"));
   }, []);
   const target = useMemo(() => websiteLoginUrl(returnTo), [returnTo]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => window.location.assign(target), 150);
-    return () => window.clearTimeout(timer);
-  }, [target]);
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, returnTo }),
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { next?: string; error?: { message?: string } }
+        | null;
+      if (!response.ok || !data?.next) {
+        setError(data?.error?.message ?? "Could not sign in. Check your email and password.");
+        return;
+      }
+      window.location.assign(data.next);
+    } catch {
+      setError("The registration service is unavailable. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="grid min-h-dvh place-items-center bg-canvas px-4 py-10">
@@ -51,31 +79,72 @@ export function LoginScreen() {
 
         <NeoCard elevated>
           <NeoCard.Header
-            title="Continue through Gateways"
-            subtitle="Staff authenticate on the main website. After login, the server securely hands your active role to this console."
+            title="Staff sign in"
+            subtitle="Use the email and password assigned to your staff account. Access follows your active role and event assignments."
           />
           <NeoCard.Raw>
-            <div className="space-y-3">
+            <form onSubmit={submit} className="space-y-3">
+              <NeoInput
+                label="Email"
+                type="email"
+                autoComplete="username"
+                autoFocus
+                required
+                icon={<Mail />}
+                placeholder="staff@example.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+              <NeoInput
+                label="Password"
+                type="password"
+                autoComplete="current-password"
+                required
+                icon={<KeyRound />}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+
+              {error ? (
+                <div role="alert" className="flex items-start gap-2.5 rounded-neo bg-failed-bg p-3">
+                  <ShieldAlert className="mt-0.5 size-4 shrink-0 text-failed" />
+                  <p className="text-[0.8rem] leading-snug text-ink-soft">{error}</p>
+                </div>
+              ) : null}
+
               <div className="flex items-start gap-2.5 rounded-neo bg-paid-bg p-3 text-[0.8rem] leading-snug text-ink-soft">
                 <ShieldCheck className="mt-0.5 size-4 shrink-0 text-paid" />
-                <span>Password, role, event assignment, and revocation are checked by the backend.</span>
+                <span>Staff role, event scope, and revocation are checked against the database on every protected request.</span>
               </div>
               <NeoButton
-                type="button"
+                type="submit"
                 variant="primary"
                 size="lg"
                 block
                 icon={<LogIn />}
-                onClick={() => window.location.assign(target)}
+                loading={busy}
+                disabled={!email || !password}
               >
-                Continue to website login
+                Sign in to console
               </NeoButton>
+            </form>
+
+            <div className="my-4 flex items-center gap-3" aria-hidden>
+              <span className="h-px flex-1 bg-hairline" />
+              <span className="engraved">or</span>
+              <span className="h-px flex-1 bg-hairline" />
+            </div>
+
+            <div className="space-y-2">
               <a
                 href={target}
-                className="flex items-center justify-center gap-1.5 text-[0.75rem] text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+                className="neo-raised-sm flex h-10 items-center justify-center gap-2 rounded-neo text-[0.8rem] font-medium text-ink-soft transition-all hover:-translate-y-px hover:text-ink active:neo-pressed"
               >
-                Open login manually <ExternalLink className="size-3.5" />
+                Continue with Google on Gateways <ExternalLink className="size-3.5" />
               </a>
+              <p className="text-center text-[0.7rem] leading-relaxed text-ink-faint">
+                Participant-only accounts cannot access this console.
+              </p>
             </div>
           </NeoCard.Raw>
         </NeoCard>

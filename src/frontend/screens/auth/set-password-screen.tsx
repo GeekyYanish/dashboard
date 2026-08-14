@@ -71,7 +71,7 @@ export function SetPasswordScreen() {
         <NeoCard elevated>
           <NeoCard.Header
             title="First sign-in"
-            subtitle="You signed in with a shared default. Choose your own before continuing — everything you do from here is recorded against your name in the audit log."
+            subtitle="You signed in with a temporary password. Choose your own before continuing — everything you do from here is recorded against your account."
           />
           <NeoCard.Raw>
             <form onSubmit={submit} className="space-y-3">
@@ -173,8 +173,7 @@ export function SetPasswordScreen() {
         </NeoCard>
 
         <p className="mt-5 text-center text-[0.72rem] leading-relaxed text-ink-faint">
-          Forgotten which default you used? Sign out and open <span className="font-medium">Demo
-          accounts</span> on the login screen — or reset the demo data to restore them.
+          If you do not know your temporary password, ask a Registration Head to reset your staff account.
           <br />
           <br />
           {FEST.fullName}

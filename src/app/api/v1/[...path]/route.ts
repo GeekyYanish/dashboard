@@ -36,6 +36,30 @@ async function forward(request: Request) {
   if (response.status === 401 || response.status === 403) {
     responseHeaders.append("set-cookie", `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
   }
+
+  // Changing a temporary password revokes the old bearer session and returns a
+  // rotated one. Keep that token server-side: replace the console cookie and
+  // remove the credential from the JSON body before it reaches browser code.
+  if (suffix === "/auth/change-password" && response.ok) {
+    const data = await response.json().catch(() => null) as
+      | ({ token?: string; expiresAt?: string } & Record<string, unknown>)
+      | null;
+    if (data?.token) {
+      const { token, expiresAt, ...safeData } = data;
+      const next = NextResponse.json(safeData, { status: response.status, headers: responseHeaders });
+      const cookieMaxAge = expiresAt
+        ? Math.max(1, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
+        : 12 * 60 * 60;
+      next.cookies.set(COOKIE, token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV !== "development",
+        sameSite: "lax",
+        path: "/",
+        maxAge: cookieMaxAge,
+      });
+      return next;
+    }
+  }
   return new NextResponse(response.status === 204 ? null : response.body, { status: response.status, headers: responseHeaders });
 }
 

@@ -107,6 +107,12 @@ export interface AuthRepo {
   /** Throws PASSWORD_TOO_WEAK, or INVALID_CREDENTIALS if `current` is wrong. */
   changePassword(current: string, next: string): Promise<void>;
   onAuthStateChange(cb: (s: Session | null) => void): Unsubscribe;
+  /**
+   * Hands this console session back to the Gateways website — the reverse of
+   * how staff got here in the first place. Website exchanges the code for its
+   * own cookie session; see BACKEND-API-CONTRACT.md.
+   */
+  createWebsiteHandoff?(returnTo?: string): Promise<{ url: string; expiresAt: string }>;
 }
 
 export interface OverviewRepo {

@@ -10,6 +10,7 @@ import {
   Activity,
   Plus,
   Trash2,
+  RotateCw,
 } from "lucide-react";
 import { Page, PageHeader, StatGrid } from "@/frontend/components/page";
 import {
@@ -28,7 +29,8 @@ import {
   type Column,
 } from "@/frontend/components/neo";
 import { BarChart } from "@/frontend/components/charts";
-import { useAsync } from "@/frontend/hooks/use-async";
+import { FilterBar, type Facet } from "@/frontend/components/filter-bar";
+import { useAsync, useDebounced } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
 import { isDataError, type AuditEvent, type StaffMember } from "@/lib/data/types";
@@ -399,20 +401,50 @@ export function TeamScreen() {
    Audit log
    ========================================================================== */
 
-export function AuditScreen() {
-  const lookups = useLookups();
-  const [entity, setEntity] = useState("");
-  const [actorId, setActorId] = useState("");
+/** The server caps a page at 200; asking for more would silently return 200. */
+const AUDIT_PAGE_SIZE = 200;
 
-  const events = useAsync(
-    () =>
-      getRepo().audit.list({
-        entity: entity || undefined,
-        actorId: actorId || undefined,
-        limit: 500,
-      }),
-    [entity, actorId],
-  );
+export function AuditScreen() {
+  const { session } = useAuth();
+  const [search, setSearch] = useState("");
+  const dSearch = useDebounced(search, 220);
+  const [facetState, setFacetState] = useState<Record<string, string[]>>({});
+
+  // One fetch, filtered in memory. The registrations/payments screens run a
+  // second unfiltered query for facet counts because they filter server-side;
+  // here the whole page is already client-side, so a second call would be a
+  // duplicate request for data we are holding.
+  const events = useAsync(() => getRepo().audit.list({ limit: AUDIT_PAGE_SIZE }), []);
+
+  const rows = events.data ?? [];
+
+  const facets: Facet[] = useMemo(() => {
+    const count = (pick: (a: AuditEvent) => string) => {
+      const tally = new Map<string, number>();
+      for (const row of rows) tally.set(pick(row), (tally.get(pick(row)) ?? 0) + 1);
+      return [...tally.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([value, n]) => ({ value, label: titleCase(value), count: n }));
+    };
+    return [
+      { key: "action", label: "Action", options: count((a) => a.action), selected: facetState.action ?? [] },
+      { key: "entity", label: "Entity", options: count((a) => a.entity), selected: facetState.entity ?? [] },
+      { key: "actor", label: "Who", options: count((a) => a.actorName), selected: facetState.actor ?? [] },
+    ];
+  }, [rows, facetState]);
+
+  const filtered = useMemo(() => {
+    const term = dSearch.trim().toLowerCase();
+    return rows.filter((a) => {
+      if (facetState.action?.length && !facetState.action.includes(a.action)) return false;
+      if (facetState.entity?.length && !facetState.entity.includes(a.entity)) return false;
+      if (facetState.actor?.length && !facetState.actor.includes(a.actorName)) return false;
+      if (!term) return true;
+      return `${a.action} ${a.entity} ${a.entityId} ${a.actorName} ${a.after ? JSON.stringify(a.after) : ""}`
+        .toLowerCase()
+        .includes(term);
+    });
+  }, [rows, dSearch, facetState]);
 
   const cols: Column<AuditEvent>[] = [
     {
@@ -456,19 +488,22 @@ export function AuditScreen() {
       ),
     },
     {
-      key: "change",
-      header: "Before → after",
+      // The backend records no pre-images, so a "before → after" column would
+      // read "— → {...}" on every live row. One Details column tells the truth
+      // for both the live backend and the demo store.
+      key: "details",
+      header: "Details",
       cell: (a) => (
         <span className="truncate font-mono text-[0.7rem] text-ink-muted">
-          {a.before ? JSON.stringify(a.before) : "—"} → {a.after ? JSON.stringify(a.after) : "—"}
+          {a.after ? JSON.stringify(a.after) : "—"}
         </span>
       ),
     },
     {
       key: "note",
-      header: "Note",
+      header: "Correlation",
       hideBelow: "lg",
-      cell: (a) => <span className="truncate text-[0.75rem] text-ink-muted">{a.note ?? "—"}</span>,
+      cell: (a) => <span className="truncate font-mono text-[0.7rem] text-ink-muted">{a.note ?? "—"}</span>,
     },
   ];
 
@@ -478,87 +513,89 @@ export function AuditScreen() {
         title="Audit log"
         description="Every mutation, immutable, newest first. When a dispute surfaces three weeks after the fest, this is the only thing that settles it."
         actions={
-          <NeoButton
-            size="sm"
-            variant="secondary"
-            icon={<Download />}
-            onClick={() =>
-              downloadCsv("audit-log.csv", [
-                ["When", "Actor", "Action", "Entity", "Entity ID", "Before", "After", "Note"],
-                ...(events.data ?? []).map((a) => [
-                  a.at, a.actorName, a.action, a.entity, a.entityId,
-                  JSON.stringify(a.before ?? ""), JSON.stringify(a.after ?? ""), a.note ?? "",
-                ]),
-              ])
-            }
-          >
-            Export log
-          </NeoButton>
+          <div className="flex gap-2">
+            <NeoButton
+              size="sm"
+              variant="secondary"
+              icon={<RotateCw />}
+              onClick={events.reload}
+              disabled={events.loading}
+            >
+              Refresh
+            </NeoButton>
+            <NeoButton
+              size="sm"
+              variant="secondary"
+              icon={<Download />}
+              onClick={() =>
+                downloadCsv("audit-log.csv", [
+                  ["When", "Actor", "Action", "Entity", "Entity ID", "Details", "Correlation"],
+                  ...filtered.map((a) => [
+                    a.at, a.actorName, a.action, a.entity, a.entityId,
+                    JSON.stringify(a.after ?? ""), a.note ?? "",
+                  ]),
+                ])
+              }
+            >
+              Export log
+            </NeoButton>
+          </div>
         }
       />
 
       <StatGrid cols={3}>
         <NeoStatTile
           label="Events recorded"
-          value={(events.data?.length ?? 0).toLocaleString("en-IN")}
+          value={rows.length.toLocaleString("en-IN")}
           icon={<ScrollText />}
-          deltaLabel="Most recent 500"
+          deltaLabel={`Most recent ${AUDIT_PAGE_SIZE}`}
         />
         <NeoStatTile
           label="Distinct actors"
-          value={new Set((events.data ?? []).map((a) => a.actorId)).size}
+          value={new Set(rows.map((a) => a.actorId)).size}
         />
         <NeoStatTile
           label="Money actions"
-          value={
-            (events.data ?? []).filter(
-              (a) => a.entity === "payment" || a.entity === "refund" || a.entity === "shift",
-            ).length
-          }
+          value={rows.filter((a) => a.entity === "payment" || a.entity === "payment_receipt" || a.entity === "refund").length}
           icon={<ShieldCheck />}
         />
       </StatGrid>
 
-      <div className="flex flex-wrap gap-2">
-        <NeoSelect
-          value={entity}
-          onChange={(e) => setEntity(e.target.value)}
-          placeholder="All entities"
-          className="w-52"
-          options={[
-            "payment", "registration", "participant", "refund", "allotment",
-            "document", "team", "ticket", "certificate", "shift", "settlement",
-          ].map((x) => ({ value: x, label: titleCase(x) }))}
-        />
-        <NeoSelect
-          value={actorId}
-          onChange={(e) => setActorId(e.target.value)}
-          placeholder="All actors"
-          className="w-52"
-          options={lookups.staff.map((s) => ({ value: s.id, label: s.name }))}
-        />
-        {entity || actorId ? (
-          <NeoButton
-            size="md"
-            variant="ghost"
-            onClick={() => {
-              setEntity("");
-              setActorId("");
-            }}
-          >
-            Clear
-          </NeoButton>
-        ) : null}
-      </div>
+      {events.error ? (
+        <p className="rounded-neo bg-failed-bg p-2.5 text-[0.78rem] text-failed" role="alert">
+          {isDataError(events.error) ? events.error.message : "Could not load the audit log."}
+        </p>
+      ) : null}
+
+      {session && session.role !== "head" ? (
+        <p className="text-[0.76rem] text-ink-muted">
+          Showing activity for your assigned events only. Sign-ins, role changes and other
+          console-wide actions are visible to administrators.
+        </p>
+      ) : null}
+
+      <FilterBar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search action, entity, actor or details…"
+        facets={facets}
+        onFacetChange={(key, values) => setFacetState((s) => ({ ...s, [key]: values }))}
+        onClearAll={() => {
+          setFacetState({});
+          setSearch("");
+        }}
+        resultCount={filtered.length}
+        totalCount={rows.length}
+      />
 
       <NeoCard>
         <NeoCard.Body flush>
           <DataTable
-            rows={events.data ?? []}
+            rows={filtered}
             columns={cols}
             rowKey={(a) => a.id}
             loading={events.loading}
-            pageSize={40}
+            pageSize={30}
             empty={<EmptyState icon={<ScrollText />} title="Nothing logged for this filter" />}
           />
         </NeoCard.Body>

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- backend JSON is validated at the API boundary. */
 import { api } from "./api-client";
 import { selectedEventId } from "./scope";
-import type { AuthRepo, OverviewRepo, ParticipantRepo, RegistrationRepo, PaymentRepo, EventRepo, TeamRepo, StaffRepo, AdminRepo, Actor, ImportPreview } from "../repository";
+import type { AuthRepo, AuditRepo, OverviewRepo, ParticipantRepo, RegistrationRepo, PaymentRepo, EventRepo, TeamRepo, StaffRepo, AdminRepo, Actor, ImportPreview } from "../repository";
 import type { Session } from "../../auth/session";
 import type { AttentionItem, AuditEvent, Announcement, EventStats, FestEvent, OverviewStats, Participant, ParticipantFlags, Payment, PaymentStatus, Registration, RegistrationStatus, StaffMember, SubstitutionRequest, Team } from "../types";
 import { DataError, isDataError } from "../types";
@@ -58,6 +58,9 @@ export class HttpAuth implements AuthRepo {
   }
   async changePassword(current: string, next: string): Promise<void> {
     await api.post("/api/v1/auth/change-password", { currentPassword: current, newPassword: next });
+  }
+  async createWebsiteHandoff(returnTo = "/"): Promise<{ url: string; expiresAt: string }> {
+    return api.post("/api/v1/auth/website-handoff", { returnTo });
   }
   onAuthStateChange(cb: (s: Session | null) => void) {
     this.listeners.add(cb);
@@ -269,10 +272,52 @@ function emptyOverview(value: any): OverviewStats {
   return { totalRegistrations: value.totalRegistrations ?? 0, confirmed: value.confirmedRegistrations ?? 0, pending: value.pendingRegistrations ?? 0, waitlisted: value.waitlistedRegistrations ?? 0, cancelled: value.cancelledRegistrations ?? 0, participants: value.totalParticipants ?? 0, collegesOnboarded: 0, revenueCollected: value.verifiedRevenueInr ?? 0, revenueExpected: expected, outstandingDues: Math.max(0, expected - (value.verifiedRevenueInr ?? 0)), verificationQueueDepth: value.pendingPayments ?? 0, oldestPendingHours: 0, accommodationRequested: 0, accommodationAllotted: 0, accommodationCapacity: 0, checkedInToday: 0, docsPending: 0, openTickets: 0, funnel: [{ stage: "Participants", count: value.totalParticipants ?? 0 }, { stage: "Registrations", count: value.totalRegistrations ?? 0 }, { stage: "Confirmed", count: value.confirmedRegistrations ?? 0 }], series: [], revenueByMethod: [], registrationsByTrack: [], topColleges: [] };
 }
 
+/**
+ * The backend audit row is actor/action/target/metadata; the console's AuditEvent
+ * is actor/action/entity/before-after. The shapes are close but not identical:
+ *
+ *  - `before` is always null. The backend stores no pre-images, and adding them
+ *    is a schema change nobody asked for. The screen renders a single Details
+ *    column so a null `before` is not a hole in the UI.
+ *  - `note` carries the correlation id, which is what makes an audit row
+ *    cross-referenceable against backend request logs.
+ */
+function toAuditEvent(value: any): AuditEvent {
+  return {
+    id: value.id,
+    actorId: value.actorId,
+    actorName: value.actorName ?? value.actorEmail ?? value.actorId,
+    action: value.action,
+    entity: value.targetType,
+    entityId: value.targetId,
+    before: null,
+    after: (value.metadata ?? null) as Record<string, unknown> | null,
+    at: iso(value.createdAt),
+    note: value.correlationId ?? null,
+  };
+}
+
+export class HttpAudit implements AuditRepo {
+  async list(filter: { entity?: string; actorId?: string; action?: string; limit?: number } = {}) {
+    try {
+      const result = await api.get<any>("/api/v1/admin/audit", { action: filter.action, actorId: filter.actorId, limit: filter.limit ?? 200 });
+      const rows = (result.items ?? []).map(toAuditEvent);
+      // targetType is not a server-side filter: the console's `entity` facet is
+      // computed from the loaded page, so filtering it here keeps the two in step.
+      return filter.entity ? rows.filter((row: AuditEvent) => row.entity === filter.entity) : rows;
+    } catch (error) {
+      // A SCANNER (or any non-staff session) gets an empty log rather than a
+      // crash — same treatment HttpStaff.list gives its own forbidden case.
+      if (isDataError(error) && ["FORBIDDEN", "NOT_AUTHENTICATED"].includes(error.code)) return [];
+      throw error;
+    }
+  }
+}
+
 export class HttpOverview implements OverviewRepo {
   async stats() { return emptyOverview(await api.get<any>("/api/v1/admin/overview", scopeQuery())); }
   async attention(): Promise<AttentionItem[]> { const stats = await this.stats(); return stats.verificationQueueDepth ? [{ id: "pending-payments", kind: "payment_aging", severity: "warning", title: "Payments awaiting review", detail: `${stats.verificationQueueDepth} receipt(s) need ADMIN verification.`, href: "/payments/queue", count: stats.verificationQueueDepth }] : []; }
-  async activity(): Promise<AuditEvent[]> { return []; }
+  async activity(limit = 20): Promise<AuditEvent[]> { return new HttpAudit().list({ limit }); }
   async announcements(): Promise<Announcement[]> { return []; }
 }
 

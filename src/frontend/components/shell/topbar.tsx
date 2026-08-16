@@ -15,6 +15,7 @@ import {
   RotateCw,
   KeyRound,
   LogOut,
+  ExternalLink,
 } from "lucide-react";
 import {
   NeoIconButton,
@@ -27,6 +28,7 @@ import {
 } from "@/frontend/components/neo";
 import { usePrefs } from "@/frontend/prefs";
 import { useAuth } from "@/frontend/hooks/use-auth";
+import { getRepo } from "@/lib/data";
 import { useDaysUntil } from "@/frontend/hooks/use-now";
 import { ALL_NAV_ITEMS } from "@/frontend/nav";
 import { FEST, roleById } from "@/lib/fest.config";
@@ -255,6 +257,15 @@ export function Topbar({
             </MenuItem>
             <MenuItem onClick={() => router.push("/audit")}>My activity</MenuItem>
             <div className="my-1 h-px bg-engrave" />
+            <MenuItem
+              icon={<ExternalLink />}
+              onClick={async () => {
+                const handoff = await getRepo().auth.createWebsiteHandoff?.("/");
+                if (handoff) window.location.assign(handoff.url);
+              }}
+            >
+              Open participant site
+            </MenuItem>
             <MenuItem
               icon={<LogOut />}
               danger

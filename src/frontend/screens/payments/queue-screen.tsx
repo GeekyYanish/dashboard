@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Check,
   X,
@@ -314,18 +314,29 @@ export function QueueScreen() {
 }
 
 /**
- * Renders the uploaded receipt.
+ * Renders the uploaded receipt inline.
  *
- * The URL is fetched per payment rather than carried on the Payment record: the
- * backend signs it with a signature that expires in minutes, so anything cached
- * in a list would be dead on arrival. Fetching it also produces the
- * `payment_receipt_viewed` audit row on the backend.
+ * PDFs go in an <iframe> and images in an <img>. An <iframe> hands the file to
+ * the browser's built-in PDF viewer (PDFium in Chrome, pdf.js in Firefox), which
+ * is why no PDF library is needed here. A PDF in an <img> renders nothing at
+ * all, and <object> quietly falls back to its child content in some Chrome
+ * versions — both look identical to "the receipt is missing".
  *
- * PDFs go in an <object> and images in an <img> — a PDF in an <img> renders
- * nothing at all, which is what made receipts look "not viewing". The file type
- * comes from the stored filename, since a signed Cloudinary URL carries query
- * parameters and need not end in a usable extension.
+ * The type comes from the stored filename because the URL is an API path with
+ * no extension. The bytes arrive from the console's own origin: see
+ * HttpPayments.receiptUrl for why the storage URL cannot be embedded directly.
  */
+function ReceiptMessage({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="grid size-full place-items-center p-4 text-center">
+      <div>
+        <p className="text-[0.85rem] font-semibold text-ink">{title}</p>
+        <div className="mt-1 max-w-[26ch] text-[0.75rem] text-ink-muted">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 function ReceiptView({ payment }: { payment: Payment }) {
   const receipt = useAsync(() => getRepo().payments.receiptUrl(payment.id), [payment.id]);
   const name = payment.receiptFileName ?? "";
@@ -335,71 +346,64 @@ function ReceiptView({ payment }: { payment: Payment }) {
   // desk. Checked before the fetch state so it never flashes a loading skeleton.
   if (!name) {
     return (
-      <div>
-        <p className="text-[0.85rem] font-semibold text-ink">Cash at desk</p>
-        <p className="mt-1 text-[0.75rem] text-ink-muted">
-          No receipt uploaded — verify against the shift drawer.
-        </p>
-      </div>
+      <ReceiptMessage title="Cash at desk">
+        No receipt uploaded — verify against the shift drawer.
+      </ReceiptMessage>
     );
   }
 
-  if (receipt.loading) {
-    return <NeoSkeleton className="size-full rounded-neo" />;
-  }
+  if (receipt.loading) return <NeoSkeleton className="size-full" />;
 
   if (receipt.error) {
     return (
-      <div role="alert">
-        <p className="text-[0.8rem] font-semibold text-failed">Receipt could not be loaded</p>
-        <p className="mt-1 text-[0.74rem] text-ink-muted">
-          {isDataError(receipt.error) ? receipt.error.message : "Try again in a moment."}
-        </p>
-        <NeoButton size="sm" variant="secondary" className="mt-3" onClick={receipt.reload}>
-          Retry
-        </NeoButton>
+      <div className="grid size-full place-items-center p-4 text-center" role="alert">
+        <div>
+          <p className="text-[0.85rem] font-semibold text-failed">Receipt could not be loaded</p>
+          <p className="mt-1 max-w-[26ch] text-[0.75rem] text-ink-muted">
+            {isDataError(receipt.error) ? receipt.error.message : "Try again in a moment."}
+          </p>
+          <NeoButton size="sm" variant="secondary" className="mt-3" onClick={receipt.reload}>
+            Retry
+          </NeoButton>
+        </div>
       </div>
     );
   }
 
   if (!receipt.data) {
     return (
-      <div>
-        <p className="text-[0.85rem] font-semibold text-ink">Receipt unavailable</p>
-        <p className="mt-1 max-w-[24ch] text-[0.75rem] text-ink-muted">
-          {name} was recorded, but the file could not be retrieved.
-        </p>
-      </div>
+      <ReceiptMessage title="Receipt unavailable">
+        {name} was recorded, but the file could not be retrieved.
+      </ReceiptMessage>
     );
   }
 
   return (
-    <div className="flex size-full flex-col gap-2">
+    <div className="flex size-full flex-col">
       {isPdf ? (
-        <object data={receipt.data} type="application/pdf" className="min-h-0 flex-1 rounded-neo">
-          {/* Browsers with no inline PDF plugin fall through to this. */}
-          <div className="grid size-full place-items-center p-4 text-center">
-            <p className="text-[0.75rem] text-ink-muted">
-              This browser cannot display PDFs inline.
-            </p>
-          </div>
-        </object>
+        <iframe
+          src={receipt.data}
+          title={`Payment receipt — ${name}`}
+          // min-h-0 matters: without it the iframe's default intrinsic height
+          // wins over flex-1 and the viewer collapses.
+          className="min-h-0 w-full flex-1 border-0 bg-white"
+        />
       ) : (
         <img
           src={receipt.data}
-          alt={`Payment receipt ${name || payment.id}`}
-          className="min-h-0 flex-1 rounded-neo object-contain"
+          alt={`Payment receipt — ${name}`}
+          className="min-h-0 w-full flex-1 bg-white object-contain"
         />
       )}
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <span className="truncate font-mono text-[0.68rem] text-ink-faint">{name || "receipt"}</span>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-engrave px-2 py-1.5">
+        <span className="truncate font-mono text-[0.68rem] text-ink-faint">{name}</span>
         <a
           href={receipt.data}
           target="_blank"
           rel="noopener noreferrer"
           className="shrink-0 text-[0.72rem] font-semibold text-ink-soft underline"
         >
-          Open full size
+          Open in new tab
         </a>
       </div>
     </div>
@@ -480,7 +484,10 @@ function ReviewPane({
           {/* Receipt */}
           <div>
             <SectionRule label="Receipt" className="mb-2" />
-            <div className="neo-inset grid aspect-[3/4] place-items-center rounded-neo p-4 text-center">
+            {/* No place-items-center / padding here: those stop the viewer from
+                stretching, which collapsed the PDF to zero height. Each
+                ReceiptView state centres itself instead. */}
+            <div className="neo-inset aspect-[3/4] overflow-hidden rounded-neo">
               <ReceiptView payment={payment} />
             </div>
           </div>

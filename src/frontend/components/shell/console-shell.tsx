@@ -60,7 +60,14 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    const timer = window.setInterval(refreshLiveData, 15_000);
+    // Skip the poll while the tab is hidden. Each tick fans out to every
+    // mounted useAsync, so a console left open in a background tab was issuing
+    // a burst of authenticated requests every 15 seconds indefinitely — every
+    // one of which re-derives the caller's roles against the writer database.
+    // The focus listener already refreshes the moment the operator returns.
+    const timer = window.setInterval(() => {
+      if (!document.hidden) refreshLiveData();
+    }, 15_000);
     const onFocus = () => refreshLiveData();
     window.addEventListener("focus", onFocus);
     return () => {

@@ -48,15 +48,34 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
     };
   }, []);
 
+  // Background refreshes must not flip `loading`. Screens render skeletons off
+  // that flag, so the shell's 15-second poll used to blank every mounted view
+  // twice a minute — and anything the skeleton replaced was destroyed and
+  // rebuilt, which is fatal for embedded content like the receipt viewer (the
+  // PDF restarted its load every poll and never finished).
+  //
+  // A deps change or an explicit reload() still shows the skeleton: those mean
+  // the caller asked for genuinely different data.
+  const lastExternalNonce = useRef(externalNonce);
+
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(undefined);
+    const isBackgroundRefresh = lastExternalNonce.current !== externalNonce;
+    lastExternalNonce.current = externalNonce;
+
+    if (!isBackgroundRefresh) {
+      setLoading(true);
+      setError(undefined);
+    }
     // Read through a local so the ref is not touched again after an await.
     const run = fnRef.current;
     run()
       .then((v) => {
-        if (!cancelled) setData(v);
+        if (!cancelled) {
+          setData(v);
+          // A successful background refresh clears a stale error banner.
+          setError(undefined);
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e : new Error(String(e)));

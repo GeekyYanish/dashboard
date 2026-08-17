@@ -64,7 +64,13 @@ export class HttpAuth implements AuthRepo {
   }
   onAuthStateChange(cb: (s: Session | null) => void) {
     this.listeners.add(cb);
-    const timer = window.setInterval(() => { void this.session().then(cb).catch(() => cb(null)); }, 30_000);
+    // Only poll a visible tab: this runs independently of the shell's own
+    // refresh timer, so a backgrounded console otherwise kept re-validating its
+    // session forever for nobody's benefit.
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      void this.session().then(cb).catch(() => cb(null));
+    }, 30_000);
     return () => { this.listeners.delete(cb); window.clearInterval(timer); };
   }
 }

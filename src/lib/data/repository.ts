@@ -223,6 +223,15 @@ export interface PaymentRepo {
   /** Verification queue, oldest first — the SLA is measured off this order. */
   queue(): Promise<Payment[]>;
   /**
+   * A short-lived URL for the uploaded receipt file, or null when there is none
+   * (cash at desk, or an erased receipt).
+   *
+   * Fetched per view rather than carried on `Payment`: the signature expires in
+   * minutes, so a URL embedded in a list response would be dead before anyone
+   * clicked it. Reading one is audited backend-side as `payment_receipt_viewed`.
+   */
+  receiptUrl(id: string): Promise<string | null>;
+  /**
    * Records a payment. Rejects a reused UTR (`UTR_ALREADY_USED`) and a
    * breakdown that does not sum to `amount` (`AMOUNT_MISMATCH`).
    */

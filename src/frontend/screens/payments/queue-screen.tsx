@@ -6,7 +6,6 @@ import {
   X,
   RotateCcw,
   ShieldAlert,
-  FileImage,
   ChevronDown,
   ChevronUp,
   Zap,
@@ -314,6 +313,99 @@ export function QueueScreen() {
   );
 }
 
+/**
+ * Renders the uploaded receipt.
+ *
+ * The URL is fetched per payment rather than carried on the Payment record: the
+ * backend signs it with a signature that expires in minutes, so anything cached
+ * in a list would be dead on arrival. Fetching it also produces the
+ * `payment_receipt_viewed` audit row on the backend.
+ *
+ * PDFs go in an <object> and images in an <img> — a PDF in an <img> renders
+ * nothing at all, which is what made receipts look "not viewing". The file type
+ * comes from the stored filename, since a signed Cloudinary URL carries query
+ * parameters and need not end in a usable extension.
+ */
+function ReceiptView({ payment }: { payment: Payment }) {
+  const receipt = useAsync(() => getRepo().payments.receiptUrl(payment.id), [payment.id]);
+  const name = payment.receiptFileName ?? "";
+  const isPdf = /\.pdf$/i.test(name);
+
+  // No filename means nothing was ever uploaded — a cash payment taken at the
+  // desk. Checked before the fetch state so it never flashes a loading skeleton.
+  if (!name) {
+    return (
+      <div>
+        <p className="text-[0.85rem] font-semibold text-ink">Cash at desk</p>
+        <p className="mt-1 text-[0.75rem] text-ink-muted">
+          No receipt uploaded — verify against the shift drawer.
+        </p>
+      </div>
+    );
+  }
+
+  if (receipt.loading) {
+    return <NeoSkeleton className="size-full rounded-neo" />;
+  }
+
+  if (receipt.error) {
+    return (
+      <div role="alert">
+        <p className="text-[0.8rem] font-semibold text-failed">Receipt could not be loaded</p>
+        <p className="mt-1 text-[0.74rem] text-ink-muted">
+          {isDataError(receipt.error) ? receipt.error.message : "Try again in a moment."}
+        </p>
+        <NeoButton size="sm" variant="secondary" className="mt-3" onClick={receipt.reload}>
+          Retry
+        </NeoButton>
+      </div>
+    );
+  }
+
+  if (!receipt.data) {
+    return (
+      <div>
+        <p className="text-[0.85rem] font-semibold text-ink">Receipt unavailable</p>
+        <p className="mt-1 max-w-[24ch] text-[0.75rem] text-ink-muted">
+          {name} was recorded, but the file could not be retrieved.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex size-full flex-col gap-2">
+      {isPdf ? (
+        <object data={receipt.data} type="application/pdf" className="min-h-0 flex-1 rounded-neo">
+          {/* Browsers with no inline PDF plugin fall through to this. */}
+          <div className="grid size-full place-items-center p-4 text-center">
+            <p className="text-[0.75rem] text-ink-muted">
+              This browser cannot display PDFs inline.
+            </p>
+          </div>
+        </object>
+      ) : (
+        <img
+          src={receipt.data}
+          alt={`Payment receipt ${name || payment.id}`}
+          className="min-h-0 flex-1 rounded-neo object-contain"
+        />
+      )}
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        <span className="truncate font-mono text-[0.68rem] text-ink-faint">{name || "receipt"}</span>
+        <a
+          href={receipt.data}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 text-[0.72rem] font-semibold text-ink-soft underline"
+        >
+          Open full size
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function ReviewPane({
   payment,
   lookups,
@@ -389,27 +481,7 @@ function ReviewPane({
           <div>
             <SectionRule label="Receipt" className="mb-2" />
             <div className="neo-inset grid aspect-[3/4] place-items-center rounded-neo p-4 text-center">
-              {payment.receiptData ? (
-                <div>
-                  <FileImage className="mx-auto mb-3 size-10 text-ink-faint" />
-                  <p className="font-mono text-[0.74rem] text-ink-muted">
-                    {payment.receiptFileName}
-                  </p>
-                  <p className="mt-2 max-w-[22ch] text-[0.72rem] leading-snug text-ink-faint">
-                    Receipt images are stubbed in this build — the real upload renders here.
-                  </p>
-                  <p className="mt-3 font-mono text-[0.68rem] text-ink-faint">
-                    hash {payment.receiptHash}
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-[0.85rem] font-semibold text-ink">Cash at desk</p>
-                  <p className="mt-1 text-[0.75rem] text-ink-muted">
-                    No receipt image — verify against the shift drawer.
-                  </p>
-                </div>
-              )}
+              <ReceiptView payment={payment} />
             </div>
           </div>
 

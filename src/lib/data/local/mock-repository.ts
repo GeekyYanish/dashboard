@@ -1238,6 +1238,14 @@ export class MockRepository implements Repository {
           .sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : 1)),
       ),
 
+    receiptUrl: async (id: string) => {
+      // Seeded receipts are placeholder strings ("data:seed/…"), not real data
+      // URLs, so there is nothing a viewer could render. Only hand back a value
+      // a browser can actually load.
+      const data = this.d.payments.find((p) => p.id === id)?.receiptData ?? null;
+      return data && /^data:[^;,]+[;,]/.test(data) && !data.startsWith("data:seed/") ? data : null;
+    },
+
     create: async (input: {
       participantId: string;
       registrationIds: string[];

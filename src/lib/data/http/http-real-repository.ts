@@ -228,6 +228,13 @@ export class HttpPayments implements PaymentRepo {
     }
   }
   async queue() { return this.list({ status: ["pending"] }); }
+  async receiptUrl(id: string) {
+    // A same-origin path, deliberately not the storage URL. The Next proxy
+    // attaches the console session, and the backend streams the bytes with an
+    // inline Content-Disposition — the storage URL forces a download instead,
+    // which is why embedded receipts rendered as nothing.
+    return `/api/v1/admin/payments/${id}/receipt-file`;
+  }
   async create(): Promise<Payment> { throw new DataError("FORBIDDEN", "Payment submission belongs to the participant website; the console reviews it."); }
   async review(id: string, decision: "verified" | "rejected" | "resubmit", note?: string) { return toPayment(await api.post<any>(`/api/v1/admin/payments/${id}/review`, { decision: decision === "resubmit" ? "rejected" : decision, reason: note })); }
   async bulkReview(ids: string[], decision: "verified" | "rejected", note?: string) { const result = await api.post<{ updated: number }>("/api/v1/admin/payments/bulk-review", { ids, decision, reason: note }); return result.updated; }

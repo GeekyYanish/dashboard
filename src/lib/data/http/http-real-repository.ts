@@ -69,7 +69,13 @@ export class HttpAuth implements AuthRepo {
     // session forever for nobody's benefit.
     const timer = window.setInterval(() => {
       if (document.hidden) return;
-      void this.session().then(cb).catch(() => cb(null));
+      // Same rule as the initial load in useAuth: only a genuine auth failure
+      // ends the session. Swallowing every error into cb(null) signed the
+      // operator out whenever the backend was briefly unreachable.
+      void this.session().then(cb).catch((error: unknown) => {
+        if (isDataError(error) && error.code === "STORAGE_UNAVAILABLE") return;
+        cb(null);
+      });
     }, 30_000);
     return () => { this.listeners.delete(cb); window.clearInterval(timer); };
   }

@@ -389,6 +389,11 @@ function ReceiptView({ payment }: { payment: Payment }) {
           className="min-h-0 w-full flex-1 border-0 bg-white"
         />
       ) : (
+        /* next/image is wrong for this: the src is an authenticated same-origin
+           API route, and the image optimizer would refetch it server-side
+           without the browser's session cookie. A one-off document view for one
+           reviewer, not an LCP asset. */
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={receipt.data}
           alt={`Payment receipt — ${name}`}

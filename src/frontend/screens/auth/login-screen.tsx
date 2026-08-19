@@ -1,15 +1,20 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ExternalLink, KeyRound, LogIn, Mail, ShieldAlert, ShieldCheck } from "lucide-react";
+import { KeyRound, LogIn, Mail, ShieldAlert, ShieldCheck } from "lucide-react";
 import { NeoButton, NeoCard, NeoInput } from "@/frontend/components/neo";
 import { FEST } from "@/lib/fest.config";
 
-function websiteLoginUrl(returnTo: string) {
+/**
+ * Full top-level navigation, not a fetch: the OAuth state cookie the backend
+ * sets on this call must live on the website's origin, because that is where
+ * Google's registered redirect_uri points and where the callback lands. See
+ * Gateways-website/src/app/console-google/route.ts for the other half.
+ */
+function consoleGoogleUrl(returnTo: string) {
   const base = (process.env.NEXT_PUBLIC_WEBSITE_URL ?? "http://localhost:3000").replace(/\/$/, "");
-  const url = new URL("/login", base);
-  url.searchParams.set("console", "1");
-  url.searchParams.set("next", returnTo);
+  const url = new URL("/console-google", base);
+  url.searchParams.set("returnTo", returnTo);
   return url.toString();
 }
 
@@ -33,7 +38,7 @@ export function LoginScreen() {
     if (typeof window === "undefined") return "/";
     return safeReturnTo(new URLSearchParams(window.location.search).get("next"));
   }, []);
-  const target = useMemo(() => websiteLoginUrl(returnTo), [returnTo]);
+  const googleUrl = useMemo(() => consoleGoogleUrl(returnTo), [returnTo]);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -137,12 +142,21 @@ export function LoginScreen() {
 
             <div className="space-y-2">
               <a
-                href={target}
+                href={googleUrl}
                 className="neo-raised-sm flex h-10 items-center justify-center gap-2 rounded-neo text-[0.8rem] font-medium text-ink-soft transition-all hover:-translate-y-px hover:text-ink active:neo-pressed"
               >
-                Continue with Google on Gateways <ExternalLink className="size-3.5" />
+                Continue with Google
               </a>
+              {/*
+                Static hint, not a per-account message: telling a specific
+                signin attempt "this account uses Google" would confirm the
+                address exists to anyone probing it. This renders identically
+                for every visitor and reveals nothing.
+              */}
               <p className="text-center text-[0.7rem] leading-relaxed text-ink-faint">
+                Signed up with Google? Use the button above — Google accounts have
+                no console password.
+                <br />
                 Participant-only accounts cannot access this console.
               </p>
             </div>

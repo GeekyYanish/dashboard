@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getRepo } from "@/lib/data";
+import { isDataError } from "@/lib/data/types";
 import { can, rolesFor, type Capability } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/auth/session";
 import { STAFF_ROLES, type StaffRoleId } from "@/lib/fest.config";
@@ -57,7 +58,25 @@ export function useAuth() {
       setSession(s);
       setStatus(s ? "authenticated" : "unauthenticated");
     };
-    void getRepo().auth.session().then(sync);
+    // The rejection MUST be handled here. Without a catch, a backend blip (a
+    // dev-server restart, a redeploy) surfaced as an unhandled rejection.
+    //
+    // A transport failure is not a sign-out: STORAGE_UNAVAILABLE means the
+    // console could not reach the backend, not that the operator's session
+    // ended. Signing them out on it would eject them mid-shift every time the
+    // API hiccups. Only settle to "unauthenticated" if we never had a session
+    // to begin with, so the shell renders the sign-in prompt instead of
+    // hanging on a skeleton forever.
+    void getRepo()
+      .auth.session()
+      .then(sync)
+      .catch((error: unknown) => {
+        if (isDataError(error) && error.code === "STORAGE_UNAVAILABLE") {
+          setStatus((prev) => (prev === "loading" ? "unauthenticated" : prev));
+          return;
+        }
+        sync(null);
+      });
     // Fires on sign-in/out here AND in other tabs, so signing out in one tab
     // does not leave a second tab looking authenticated.
     return getRepo().auth.onAuthStateChange(sync);

@@ -17,6 +17,7 @@ type BackendError = {
 type SigninResponse = {
   token?: string;
   expiresAt?: string;
+  user?: { id: string; email: string; mustChangePassword?: boolean };
 };
 
 function backendUrl(path: string) {
@@ -57,20 +58,21 @@ function backendFailure(response: Response, data: BackendError | null) {
   );
 }
 
-async function revoke(token: string) {
-  await fetch(backendUrl("/api/v1/auth/signout"), {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  }).catch(() => undefined);
-}
-
 /**
- * Direct console sign-in without exposing a bearer credential to browser JS.
+ * Console sign-in: one backend call.
  *
- * Password verification and staff authorization still happen in the backend.
- * For regular staff we also retain the short-lived, single-use handoff check;
- * only the exchanged console token is stored in this origin's httpOnly cookie.
+ * Hits the admin door, which verifies the password and requires an active
+ * ADMIN / ORGANIZER / SCANNER assignment *before* issuing anything. A
+ * participant password alone never opens the console, and a rejected login
+ * leaves no session row behind — so there is nothing to revoke afterwards.
+ *
+ * This used to take five round-trips (participant signin, staff probe, handoff,
+ * exchange, revoke) because the participant door issued a live credential first
+ * and authorization was checked second. Moving the check ahead of issuance made
+ * all of that unnecessary.
+ *
+ * The bearer token never reaches browser JS: it goes straight into this
+ * origin's httpOnly cookie, and the /api/v1 proxy injects it server-side.
  */
 export async function POST(request: Request) {
   const requestOrigin = new URL(request.url).origin;
@@ -94,10 +96,12 @@ export async function POST(request: Request) {
 
   let signin: Response;
   try {
-    signin = await fetch(backendUrl("/api/v1/auth/signin"), {
+    signin = await fetch(backendUrl("/api/v1/admin/auth/signin"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        // Bearer, not cookie: the backend is a different origin, so its cookie
+        // would be third-party here. The token lands in our own cookie instead.
         "X-Auth-Transport": "bearer",
       },
       body: JSON.stringify({ email: parsed.data.email, password: parsed.data.password }),
@@ -110,114 +114,22 @@ export async function POST(request: Request) {
     );
   }
 
-  const signinData = (await json(signin)) as (SigninResponse & BackendError) | null;
-  if (!signin.ok || !signinData?.token) return backendFailure(signin, signinData);
+  const data = (await json(signin)) as (SigninResponse & BackendError) | null;
 
-  const initialToken = signinData.token;
-
-  // This endpoint re-checks active ADMIN / ORGANIZER / SCANNER assignments in
-  // the database. A valid participant password alone never opens the console.
-  const staffSession = await fetch(backendUrl("/api/v1/admin/auth/session"), {
-    headers: { Authorization: `Bearer ${initialToken}` },
-    cache: "no-store",
-  }).catch(() => null);
-
-  if (!staffSession) {
-    await revoke(initialToken);
-    return NextResponse.json(
-      { error: { code: "BACKEND_UNAVAILABLE", message: "The registration service is unavailable. Try again shortly." } },
-      { status: 503 },
-    );
-  }
-
-  const staffData = (await json(staffSession)) as
-    | (BackendError & { user?: { mustChangePassword?: boolean } })
-    | null;
-  if (!staffSession.ok) {
-    await revoke(initialToken);
-    return backendFailure(staffSession, staffData);
-  }
+  // 401 wrong password, 403 no console role. Both are relayed as-is: the
+  // backend already phrases them without revealing which accounts exist.
+  if (!signin.ok || !data?.token) return backendFailure(signin, data);
 
   // A temporary password must be replaced before ordinary console access. The
-  // short-lived token is kept only in the same protected cookie so the existing
-  // password-change screen can rotate it without sending it to client JS.
-  if (staffData?.user?.mustChangePassword) {
+  // token still goes into the protected cookie so the existing password-change
+  // screen can rotate it without ever exposing it to client JS.
+  if (data.user?.mustChangePassword) {
     return withSessionCookie(
       NextResponse.json({ next: "/login/set-password", mustChangePassword: true }),
-      initialToken,
-      signinData.expiresAt,
+      data.token,
+      data.expiresAt,
     );
   }
 
-  const handoff = await fetch(backendUrl("/api/v1/auth/console-handoff"), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${initialToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ returnTo }),
-    cache: "no-store",
-  }).catch(() => null);
-
-  if (!handoff) {
-    await revoke(initialToken);
-    return NextResponse.json(
-      { error: { code: "BACKEND_UNAVAILABLE", message: "The registration service is unavailable. Try again shortly." } },
-      { status: 503 },
-    );
-  }
-
-  const handoffData = (await json(handoff)) as (BackendError & { url?: string }) | null;
-  if (!handoff.ok || !handoffData?.url) {
-    await revoke(initialToken);
-    return backendFailure(handoff, handoffData);
-  }
-
-  let code: string | null = null;
-  try {
-    code = new URL(handoffData.url).searchParams.get("code");
-  } catch {
-    // The backend owns this URL. Treat a malformed response as unavailable,
-    // never as permission to bypass the handoff.
-  }
-  if (!code) {
-    await revoke(initialToken);
-    return NextResponse.json(
-      { error: { code: "HANDOFF_FAILED", message: "The secure console handoff could not be created." } },
-      { status: 502 },
-    );
-  }
-
-  const exchange = await fetch(backendUrl("/api/v1/auth/console-handoff/exchange"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
-    cache: "no-store",
-  }).catch(() => null);
-
-  if (!exchange) {
-    await revoke(initialToken);
-    return NextResponse.json(
-      { error: { code: "BACKEND_UNAVAILABLE", message: "The registration service is unavailable. Try again shortly." } },
-      { status: 503 },
-    );
-  }
-
-  const exchangeData = (await json(exchange)) as
-    | (BackendError & { token?: string; expiresAt?: string; returnTo?: string })
-    | null;
-  if (!exchange.ok || !exchangeData?.token) {
-    await revoke(initialToken);
-    return backendFailure(exchange, exchangeData);
-  }
-
-  // The credential used to request the handoff is no longer needed. Keeping
-  // only the exchanged console session minimizes active credentials per login.
-  await revoke(initialToken);
-
-  return withSessionCookie(
-    NextResponse.json({ next: exchangeData.returnTo ?? returnTo }),
-    exchangeData.token,
-    exchangeData.expiresAt,
-  );
+  return withSessionCookie(NextResponse.json({ next: returnTo }), data.token, data.expiresAt);
 }

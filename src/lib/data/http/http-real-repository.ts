@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- backend JSON is validated at the API boundary. */
 import { api } from "./api-client";
 import { selectedEventId } from "./scope";
-import type { AuthRepo, AuditRepo, OverviewRepo, ParticipantRepo, RegistrationRepo, PaymentRepo, EventRepo, TeamRepo, StaffRepo, AdminRepo, Actor, ImportPreview } from "../repository";
+import type { AuthRepo, AuditRepo, OverviewRepo, ParticipantRepo, RegistrationRepo, PaymentRepo, EventRepo, TeamRepo, StaffRepo, AdminRepo, DeskRepo, HelpdeskRepo, CollegeRepo, Actor, ImportPreview } from "../repository";
 import type { Session } from "../../auth/session";
 import type { AttentionItem, AuditEvent, Announcement, EventStats, FestEvent, OverviewStats, Participant, ParticipantFlags, Payment, PaymentStatus, Registration, RegistrationStatus, StaffMember, SubstitutionRequest, Team } from "../types";
 import { DataError, isDataError } from "../types";
@@ -43,14 +43,35 @@ function toSession(value: any): Session {
 
 export class HttpAuth implements AuthRepo {
   private listeners = new Set<(session: Session | null) => void>();
+  private sessionPromise: Promise<Session | null> | null = null;
+  private lastSession: Session | null = null;
+  private lastFetchTime = 0;
+
   async signIn(): Promise<Session> { throw new DataError("VALIDATION_FAILED", "Sign in on the Gateways website to enter the console."); }
   async session(): Promise<Session | null> {
-    try {
-      return toSession(await api.get<any>("/api/v1/admin/auth/session"));
-    } catch (error) {
-      if (isDataError(error) && ["NOT_AUTHENTICATED", "FORBIDDEN"].includes(error.code)) return null;
-      throw error;
+    const now = Date.now();
+    if (this.lastSession && now - this.lastFetchTime < 2000) {
+      return this.lastSession;
     }
+    if (this.sessionPromise) return this.sessionPromise;
+    this.sessionPromise = (async () => {
+      try {
+        const s = toSession(await api.get<any>("/api/v1/admin/auth/session"));
+        this.lastSession = s;
+        this.lastFetchTime = Date.now();
+        return s;
+      } catch (error) {
+        if (isDataError(error) && ["NOT_AUTHENTICATED", "FORBIDDEN"].includes(error.code)) {
+          this.lastSession = null;
+          this.lastFetchTime = Date.now();
+          return null;
+        }
+        throw error;
+      } finally {
+        this.sessionPromise = null;
+      }
+    })();
+    return this.sessionPromise;
   }
   async signOut(): Promise<void> {
     await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin", cache: "no-store" });
@@ -58,6 +79,9 @@ export class HttpAuth implements AuthRepo {
   }
   async changePassword(current: string, next: string): Promise<void> {
     await api.post("/api/v1/auth/change-password", { currentPassword: current, newPassword: next });
+    this.lastFetchTime = 0;
+    const updated = await this.session();
+    this.listeners.forEach((listener) => listener(updated));
   }
   async createWebsiteHandoff(returnTo = "/"): Promise<{ url: string; expiresAt: string }> {
     return api.post("/api/v1/auth/website-handoff", { returnTo });
@@ -126,7 +150,10 @@ export class HttpParticipants implements ParticipantRepo {
     const config = await api.get<{ amountInr: number }>("/api/v1/payment-receipts/config");
     return { isMinor: Boolean(participant?.dateOfBirth && new Date(participant.dateOfBirth).getTime() > new Date("2008-10-08").getTime()), docsComplete: true, missingDocs: [], amountDue: verified > 0 ? 0 : config.amountInr, amountPaid: verified };
   }
-  async create(): Promise<Participant> { throw new DataError("FORBIDDEN", "The desk can create registrations only for existing paid participants."); }
+  async create(input: Omit<Participant, "id" | "code" | "createdAt" | "isBlocked">): Promise<Participant> {
+    const value = await api.post<any>("/api/v1/admin/participants", input);
+    return toParticipant(value);
+  }
   async update(id: string, patch: Partial<Participant>) {
     const value = await api.patch<any>(`/api/v1/admin/participants/${id}?eventId=${encodeURIComponent(selectedEventId() ?? "")}`, patch);
     return toParticipant(value);
@@ -399,4 +426,33 @@ export class HttpAdmin implements AdminRepo {
   async actor(): Promise<Actor | null> { try { const session = await api.get<any>("/api/v1/admin/auth/session"); return { id: session.user.id, name: session.user.name ?? session.user.email, role: staffRole(session.roles?.find((role: any) => role.role === "ADMIN")?.role ?? session.roles?.[0]?.role ?? "SCANNER") }; } catch { return null; } }
   async reset(): Promise<void> { throw new DataError("FORBIDDEN", "Demo reset is disabled for live database data."); }
   async tick(): Promise<void> { /* no simulated clock in live mode */ }
+}
+
+export class HttpColleges implements CollegeRepo {
+  async list() {
+    const data = await api.get<any[]>("/api/v1/reference/colleges");
+    return data.map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      shortName: c.name, // The backend doesn't have shortName, so map name to shortName
+      city: "",
+      state: "",
+      isVerified: true,
+      contactName: "",
+      contactPhone: "",
+      contactEmail: "",
+      facultyEscortName: null,
+      facultyEscortPhone: null,
+    }));
+  }
+  async get(id: string) {
+    const all = await this.list();
+    return all.find(c => c.id === id) || null;
+  }
+  async contingents(): Promise<any> {
+    throw new DataError("FORBIDDEN", "This legacy feature has been disabled and removed.");
+  }
+  async setVerified(): Promise<any> {
+    throw new DataError("FORBIDDEN", "This legacy feature has been disabled and removed.");
+  }
 }

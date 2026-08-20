@@ -33,10 +33,22 @@ export function SetPasswordScreen() {
 
   const check = useMemo(() => checkPassword(next, session?.email), [next, session?.email]);
   const mismatch = confirm.length > 0 && next !== confirm;
-  const canSubmit = current && check.ok && next === confirm && !busy;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!current) {
+      setError("Please enter your current password.");
+      return;
+    }
+    if (!next || !check.ok) {
+      setError("Please choose a password that meets the policy.");
+      return;
+    }
+    if (next !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    
     setBusy(true);
     setError(null);
     try {
@@ -164,7 +176,7 @@ export function SetPasswordScreen() {
                 block
                 icon={<KeyRound />}
                 loading={busy}
-                disabled={!canSubmit}
+                disabled={busy || !current || !next || !confirm || !check.ok || mismatch}
               >
                 Set password & continue
               </NeoButton>

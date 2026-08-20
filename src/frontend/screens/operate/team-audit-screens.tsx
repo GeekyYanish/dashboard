@@ -363,18 +363,17 @@ export function TeamScreen() {
               loading={createBusy}
               disabled={!newStaff.name.trim() || !newStaff.email.trim() || !newStaff.phone.trim() || newStaff.temporaryPassword.length < 8 || !getRepo().staff.create}
               onClick={async () => {
-                const createStaff = getRepo().staff.create;
-                if (!createStaff) return;
+                if (!getRepo().staff.create) return;
                 setCreateBusy(true);
                 setCreateError(null);
                 try {
-                  await createStaff({ ...newStaff, eventId: newStaff.role === "head" ? null : newStaff.eventId || events.data?.[0]?.id || null });
+                  await getRepo().staff.create!({ ...newStaff, eventId: newStaff.role === "head" ? null : newStaff.eventId || events.data?.[0]?.id || null });
                   toast.success("Staff account created", "They must change the temporary password before console access.");
                   setCreateOpen(false);
                   setNewStaff({ name: "", email: "", phone: "", temporaryPassword: "", role: "desk", eventId: "" });
                   staff.reload();
                 } catch (err) {
-                  setCreateError(isDataError(err) ? err.message : "Could not create staff account.");
+                  setCreateError(isDataError(err) ? err.message : err instanceof Error ? err.message : "Could not create staff account.");
                 } finally {
                   setCreateBusy(false);
                 }

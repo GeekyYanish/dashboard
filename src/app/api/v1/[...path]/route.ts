@@ -15,7 +15,8 @@ async function forward(request: Request) {
   const target = `${base}/api/v1${suffix}${incoming.search}`;
   const headers = new Headers();
   request.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase()) && key.toLowerCase() !== "authorization") headers.set(key, value);
+    const k = key.toLowerCase();
+    if (!HOP_BY_HOP.has(k) && k !== "authorization" && k !== "cookie") headers.set(key, value);
   });
   if (token) headers.set("authorization", `Bearer ${token}`);
   const init: RequestInit = { method: request.method, headers, redirect: "manual", cache: "no-store" };
@@ -33,7 +34,7 @@ async function forward(request: Request) {
   response.headers.forEach((value, key) => {
     if (key.toLowerCase() !== "set-cookie" && !HOP_BY_HOP.has(key.toLowerCase())) responseHeaders.set(key, value);
   });
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     responseHeaders.append("set-cookie", `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
   }
 

@@ -1,16 +1,20 @@
 import type { Repository } from "../repository";
-import { MockRepository } from "../local/mock-repository";
-import { HttpAdmin, HttpAudit, HttpAuth, HttpEvents, HttpOverview, HttpParticipants, HttpPayments, HttpRegistrations, HttpStaff, HttpTeams } from "./http-real-repository";
+import { DataError } from "../types";
+import { HttpAdmin, HttpAudit, HttpAuth, HttpEvents, HttpOverview, HttpParticipants, HttpPayments, HttpRegistrations, HttpStaff, HttpTeams, HttpColleges } from "./http-real-repository";
 
 /**
  * Live console composition. Core registration data always comes from the
- * backend. Legacy operations without a reviewed backend endpoint remain on the
- * mock repository and are intentionally isolated from core overview totals.
+ * backend. Legacy operations without a reviewed backend endpoint throw errors.
  */
 export function createHttpRepository(): Repository {
-  const demo = new MockRepository();
+  const unimplemented = new Proxy({}, {
+    get: () => new Proxy({}, {
+      get: () => () => { throw new DataError("FORBIDDEN", "This legacy feature has been disabled and removed."); }
+    })
+  }) as any;
+
   return {
-    ...demo,
+    ...unimplemented,
     auth: new HttpAuth(),
     overview: new HttpOverview(),
     participants: new HttpParticipants(),
@@ -19,9 +23,8 @@ export function createHttpRepository(): Repository {
     events: new HttpEvents(),
     teams: new HttpTeams(),
     staff: new HttpStaff(),
+    colleges: new HttpColleges(),
     admin: new HttpAdmin(),
-    // Without this the /audit screen silently reads the localStorage demo store
-    // even in live mode — real backend audit rows were never reaching the UI.
     audit: new HttpAudit(),
-  };
+  } as Repository;
 }

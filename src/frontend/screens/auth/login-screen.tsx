@@ -5,21 +5,13 @@ import { KeyRound, LogIn, Mail, ShieldAlert, ShieldCheck } from "lucide-react";
 import { NeoButton, NeoCard, NeoInput } from "@/frontend/components/neo";
 import { FEST } from "@/lib/fest.config";
 
-/**
- * Full top-level navigation, not a fetch: the OAuth state cookie the backend
- * sets on this call must live on the website's origin, because that is where
- * Google's registered redirect_uri points and where the callback lands. See
- * Gateways-website/src/app/console-google/route.ts for the other half.
- */
-function consoleGoogleUrl(returnTo: string) {
-  const base = (process.env.NEXT_PUBLIC_WEBSITE_URL ?? "http://localhost:3000").replace(/\/$/, "");
-  const url = new URL("/console-google", base);
-  url.searchParams.set("returnTo", returnTo);
-  return url.toString();
-}
-
 function safeReturnTo(value: string | null) {
   return value && value.startsWith("/") && !value.startsWith("//") ? value : "/";
+}
+
+/** Build the dashboard-local Google OAuth kick-off URL. */
+function consoleGoogleUrl(returnTo: string) {
+  return `/api/auth/google?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 export function LoginScreen() {
@@ -32,6 +24,9 @@ export function LoginScreen() {
     if (code === "handoff_expired") return "That sign-in link expired or was already used. Sign in again.";
     if (code === "backend_unavailable") return "The registration service is unavailable. Try again shortly.";
     if (code === "missing_handoff") return "The secure sign-in code was missing. Sign in again.";
+    if (code === "oauth_unavailable") return "Google sign-in is not available right now. Try again shortly.";
+    if (code === "no_console_access") return "Your Google account doesn't have console access. Contact an administrator.";
+    if (code === "password_change_required") return "A password change is required before you can sign in.";
     return null;
   });
   const returnTo = useMemo(() => {

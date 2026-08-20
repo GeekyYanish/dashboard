@@ -31,8 +31,25 @@ export async function GET(request: Request) {
   } catch {
     return NextResponse.redirect(loginUrl(incoming.origin, "backend_unavailable", returnTo));
   }
-  const data = await exchange.json().catch(() => null) as { token?: string; expiresAt?: string; returnTo?: string; user?: { mustChangePassword?: boolean } } | null;
-  if (!exchange.ok || !data?.token) return NextResponse.redirect(loginUrl(incoming.origin, "handoff_expired", returnTo));
+  const data = await exchange.json().catch(() => null) as {
+    token?: string;
+    expiresAt?: string;
+    returnTo?: string;
+    user?: { mustChangePassword?: boolean };
+    error?: { code?: string };
+  } | null;
+
+  if (!exchange.ok || !data?.token) {
+    // Surface meaningful errors so the login page can show the right message.
+    // FORBIDDEN → the user authenticated with Google but has no console role.
+    // MUST_CHANGE_PASSWORD → temporary password must be rotated first.
+    // Everything else → treat as an expired/invalid handoff code.
+    const code = data?.error?.code;
+    if (code === "FORBIDDEN") return NextResponse.redirect(loginUrl(incoming.origin, "no_console_access", returnTo));
+    if (code === "MUST_CHANGE_PASSWORD") return NextResponse.redirect(loginUrl(incoming.origin, "password_change_required", returnTo));
+    return NextResponse.redirect(loginUrl(incoming.origin, "handoff_expired", returnTo));
+  }
+
   if (data.user?.mustChangePassword) return NextResponse.redirect(loginUrl(incoming.origin, "password_change_required", returnTo));
 
   const response = NextResponse.redirect(new URL(returnTo, incoming.origin));

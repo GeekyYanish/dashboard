@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "NEXT_PUBLIC_USE_API_BACKEND=false tsx --tsconfig tsconfig.json scripts/run-tests.ts"
+    "test": "tsx --tsconfig tsconfig.json scripts/run-tests.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.2",

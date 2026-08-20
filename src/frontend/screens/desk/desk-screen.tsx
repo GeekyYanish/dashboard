@@ -145,7 +145,8 @@ export function DeskScreen() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "F2") {
         e.preventDefault();
-        if (isScanner) openRegistration();
+        // Scanner: F2 = "Register event" when someone is selected, "New participant" otherwise
+        if (isScanner && selected) openRegistration();
         else setMode("walkin");
       } else if (e.key === "F3" && selected) {
         e.preventDefault();
@@ -239,13 +240,25 @@ export function DeskScreen() {
         {/* Action rail — big keys, F-key labels. */}
         <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
           {isScanner ? (
-            <DeskKey
-              icon={<UserPlus />}
-              label="Register event"
-              hint="F2"
-              disabled={!selected || (flags.data?.amountPaid ?? 0) <= 0}
-              onClick={openRegistration}
-            />
+            // Scanner F2: context-sensitive — "Register event" when a participant is
+            // selected and has paid, "New participant" otherwise.
+            selected ? (
+              <DeskKey
+                icon={<UserPlus />}
+                label="Register event"
+                hint="F2"
+                disabled={(flags.data?.amountPaid ?? 0) <= 0}
+                onClick={openRegistration}
+              />
+            ) : (
+              <DeskKey
+                icon={<UserPlus />}
+                label="New participant"
+                hint="F2"
+                active={mode === "walkin"}
+                onClick={() => setMode("walkin")}
+              />
+            )
           ) : (
             <DeskKey
               icon={<UserPlus />}
@@ -282,8 +295,9 @@ export function DeskScreen() {
           <DeskKey icon={<Ticket />} label="Issue token" hint="F8" onClick={issueToken} />
         </div>
 
-        {mode === "walkin" && !isScanner ? (
+        {mode === "walkin" ? (
           <WalkInForm
+            isScanner={isScanner}
             onCancel={() => setMode("search")}
             onCreated={(p) => {
               setSelected(p);
@@ -339,12 +353,12 @@ export function DeskScreen() {
                     <EmptyState
                       icon={<Search />}
                       title="No match"
-                      hint={isScanner ? "Only existing participants with a verified festival pass can be registered here." : "Register them as a walk-in instead."}
-                      action={isScanner ? undefined : (
+                      hint={isScanner ? "Not found in the system — register them as a new participant." : "Register them as a walk-in instead."}
+                      action={
                         <NeoButton variant="primary" icon={<UserPlus />} onClick={() => setMode("walkin")}>
-                          New walk-in
+                          {isScanner ? "New participant" : "New walk-in"}
                         </NeoButton>
-                      )}
+                      }
                     />
                   ) : (
                     <div className="px-2 py-10 text-center">
@@ -353,7 +367,7 @@ export function DeskScreen() {
                         Start typing, or scan a badge.
                       </p>
                       <p className="mt-3 flex items-center justify-center gap-2 text-[0.75rem] text-ink-faint">
-                        <Kbd>F2</Kbd> {isScanner ? "register" : "walk-in"} <Kbd>F3</Kbd> {isScanner ? "check-in" : "payment"} <Kbd>F4</Kbd> badge{" "}
+                        <Kbd>F2</Kbd> {isScanner ? (selected ? "register event" : "new participant") : "walk-in"} <Kbd>F3</Kbd> {isScanner ? "check-in" : "payment"} <Kbd>F4</Kbd> badge{" "}
                         <Kbd>F8</Kbd> token
                       </p>
                     </div>
@@ -461,7 +475,14 @@ export function DeskScreen() {
                   <EmptyState
                     icon={<UserPlus />}
                     title="Nobody selected"
-                    hint={isScanner ? "Search for an existing participant with a verified pass." : "Search for a participant, or press F2 to register a walk-in."}
+                    hint={isScanner ? "Search for a participant, or press F2 to register a new walk-in." : "Search for a participant, or press F2 to register a walk-in."}
+                    action={
+                      isScanner ? (
+                        <NeoButton variant="primary" icon={<UserPlus />} onClick={() => setMode("walkin")}>
+                          New participant
+                        </NeoButton>
+                      ) : undefined
+                    }
                   />
                 </NeoCard.Body>
               </NeoCard>
@@ -713,9 +734,11 @@ function DeskRegistrationModal({
 /* ------------------------------------------------------------------------- */
 
 function WalkInForm({
+  isScanner = false,
   onCancel,
   onCreated,
 }: {
+  isScanner?: boolean;
   onCancel: () => void;
   onCreated: (p: Participant) => void;
 }) {
@@ -777,9 +800,13 @@ function WalkInForm({
   return (
     <NeoCard>
       <NeoCard.Header
-        eyebrow="Under 60 seconds"
-        title="Walk-in registration"
-        subtitle={`On-spot registrations carry a ${inr(FEES.onSpotSurcharge)} surcharge, applied automatically at payment.`}
+        eyebrow={isScanner ? "On-the-spot registration" : "Under 60 seconds"}
+        title={isScanner ? "New participant" : "Walk-in registration"}
+        subtitle={
+          isScanner
+            ? `Register a new participant at the desk. An on-spot surcharge of ${inr(FEES.onSpotSurcharge)} applies at payment.`
+            : `On-spot registrations carry a ${inr(FEES.onSpotSurcharge)} surcharge, applied automatically at payment.`
+        }
         icon={<UserPlus />}
         actions={
           <NeoButton size="sm" variant="ghost" onClick={onCancel}>

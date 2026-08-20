@@ -15,6 +15,7 @@ const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 
 (async () => {
+  process.env.NEXT_PUBLIC_USE_API_BACKEND = "false";
   const started = Date.now();
   const results = await runSuite();
 

@@ -5,7 +5,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const COOKIE = "registration_console_session";
-const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length"]);
+/**
+ * Dropped in both directions. `content-encoding` is the subtle one: fetch has
+ * already decompressed the upstream body by the time we see it, so relaying
+ * the header would label plain JSON as gzip and the browser would discard it.
+ * The backend only compresses past a size threshold, so this stays invisible
+ * until a list grows — every short response works, and the first long one
+ * arrives empty.
+ */
+const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length", "content-encoding"]);
 
 async function forward(request: Request) {
   const token = (await cookies()).get(COOKIE)?.value;

@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- backend JSON is validated at the API boundary. */
 import { api } from "./api-client";
 import { selectedEventId } from "./scope";
-import type { AuthRepo, AuditRepo, OverviewRepo, ParticipantRepo, RegistrationRepo, PaymentRepo, EventRepo, TeamRepo, StaffRepo, AdminRepo, Actor, ImportPreview } from "../repository";
+import type { AuthRepo, AuditRepo, OverviewRepo, ParticipantRepo, RegistrationRepo, PaymentRepo, EventRepo, TeamRepo, StaffRepo, AdminRepo, CollegeRepo, Actor, ImportPreview } from "../repository";
 import type { Session } from "../../auth/session";
-import type { AttentionItem, AuditEvent, Announcement, EventStats, FestEvent, OverviewStats, Participant, ParticipantFlags, Payment, PaymentStatus, Registration, RegistrationStatus, StaffMember, SubstitutionRequest, Team } from "../types";
+import type { AttentionItem, AuditEvent, Announcement, College, EventStats, FestEvent, OverviewStats, Participant, ParticipantFlags, Payment, PaymentStatus, Registration, RegistrationStatus, StaffMember, SubstitutionRequest, Team } from "../types";
 import { DataError, isDataError } from "../types";
 import { type PaymentMethodId, type StaffRoleId } from "../../fest.config";
 
@@ -405,4 +405,38 @@ export class HttpAdmin implements AdminRepo {
   async actor(): Promise<Actor | null> { try { const session = await api.get<any>("/api/v1/admin/auth/session"); return { id: session.user.id, name: session.user.name ?? session.user.email, role: staffRole(session.roles?.find((role: any) => role.role === "ADMIN")?.role ?? session.roles?.[0]?.role ?? "SCANNER") }; } catch { return null; } }
   async reset(): Promise<void> { throw new DataError("FORBIDDEN", "Demo reset is disabled for live database data."); }
   async tick(): Promise<void> { /* no simulated clock in live mode */ }
+}
+
+
+/**
+ * Colleges and contingent rollups.
+ *
+ * The backend's colleges table stores an id, a name and a verification flag.
+ * City is derived from the name and short name is the name with its
+ * parenthetical stripped; state, the contingent contact and the faculty
+ * escort have nowhere to come from and arrive empty. Beds and arrival time
+ * are always zero and null — no accommodation module exists yet — so those
+ * two columns stay blank rather than showing invented logistics.
+ */
+export class HttpColleges implements CollegeRepo {
+  async list(): Promise<College[]> {
+    return await api.get<College[]>("/api/v1/admin/colleges");
+  }
+  async get(id: string): Promise<College | null> {
+    return (await this.list()).find((college) => college.id === id) ?? null;
+  }
+  async contingents() {
+    return await api.get<{
+      college: College;
+      participants: number;
+      confirmed: number;
+      paid: number;
+      due: number;
+      accommodation: number;
+      arrivalAt: string | null;
+    }[]>("/api/v1/admin/colleges/contingents");
+  }
+  async setVerified(id: string, verified: boolean): Promise<College> {
+    return await api.patch<College>(`/api/v1/admin/colleges/${id}`, { isVerified: verified });
+  }
 }

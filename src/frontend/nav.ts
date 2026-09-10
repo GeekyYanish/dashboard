@@ -63,7 +63,7 @@ export const NAV: NavSection[] = [
         match: ["/registrations/import", "/registrations/new", "/registrations/duplicates", "/registrations/clashes", "/registrations/waitlist"],
       },
       { href: "/participants", label: "Participants", icon: Users },
-      { href: "/colleges", label: "Colleges", icon: Building2, demoOnly: true },
+      { href: "/colleges", label: "Colleges", icon: Building2 },
       { href: "/teams", label: "Teams", icon: UsersRound },
       { href: "/events", label: "Events", icon: CalendarDays },
     ],

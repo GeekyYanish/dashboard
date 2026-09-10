@@ -90,8 +90,12 @@ export function CollegesScreen() {
               <BadgeCheck className="size-3.5 shrink-0 text-paid" aria-label="Verified" />
             ) : null}
           </div>
+          {/* State is not stored anywhere, and a single-segment name yields no
+              city either, so join what exists instead of rendering a bare
+              comma. Falls back to the full institution name, which is always
+              more useful than an empty line. */}
           <div className="truncate text-[0.72rem] text-ink-muted">
-            {r.college.city}, {r.college.state}
+            {[r.college.city, r.college.state].filter(Boolean).join(", ") || r.college.name}
           </div>
         </div>
       ),

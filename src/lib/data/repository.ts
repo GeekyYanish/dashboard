@@ -146,6 +146,13 @@ export interface ParticipantRepo {
   /** DPDP obligation: hand back everything held about one person. */
   exportPersonalData(id: string): Promise<Record<string, unknown>>;
   erase(id: string): Promise<void>;
+  /**
+   * Permanently deletes the participant and everything the database cascades
+   * from them — registrations, payments, team memberships. Distinct from
+   * `erase`, which keeps the record and blanks the identity. Refused when a
+   * verified payment or a led team would be destroyed with it.
+   */
+  remove(id: string): Promise<{ registrations: number; payments: number; teamMemberships: number }>;
 }
 
 export interface RegistrationFilter {

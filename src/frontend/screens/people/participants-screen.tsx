@@ -264,6 +264,7 @@ function ParticipantDrawer({
   const canExportPersonalData = role === "head";
   const [tab, setTab] = useState<Tab>("profile");
   const [eraseOpen, setEraseOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const p = participantId ? lookups.participant(participantId) : undefined;
   const flags = useAsync(
@@ -338,10 +339,18 @@ function ParticipantDrawer({
               <NeoButton
                 size="sm"
                 variant="danger"
-                icon={<Trash2 />}
+                icon={<ShieldOff />}
                 onClick={() => setEraseOpen(true)}
               >
                 Erase
+              </NeoButton>
+              <NeoButton
+                size="sm"
+                variant="danger"
+                icon={<Trash2 />}
+                onClick={() => setDeleteOpen(true)}
+              >
+                Delete
               </NeoButton>
             </>
           ) : null
@@ -620,6 +629,57 @@ function ParticipantDrawer({
         <p className="text-[0.85rem] leading-relaxed text-ink-soft">
           This cannot be undone. Use it only on a verified erasure request from the participant
           themselves.
+        </p>
+      </NeoModal>
+
+      <NeoModal
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete participant"
+        description="This permanently removes the participant and everything the database cascades from them — their registrations, any pending payments and their team memberships. It cannot be undone. Use Erase instead to anonymise someone who asked to be forgotten while keeping the money trail."
+        footer={
+          <>
+            <NeoButton variant="ghost" onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </NeoButton>
+            <NeoButton
+              variant="danger"
+              icon={<Trash2 />}
+              onClick={async () => {
+                if (!p) return;
+                setDeleteOpen(false);
+                try {
+                  const destroyed = await getRepo().participants.remove(p.id);
+                  const parts = [
+                    destroyed.registrations ? `${destroyed.registrations} registration(s)` : null,
+                    destroyed.payments ? `${destroyed.payments} payment(s)` : null,
+                    destroyed.teamMemberships ? `${destroyed.teamMemberships} team membership(s)` : null,
+                  ].filter(Boolean);
+                  toast.success(
+                    "Participant deleted",
+                    parts.length ? `Also removed ${parts.join(", ")}.` : "No linked records.",
+                  );
+                  onClose();
+                  onChanged();
+                } catch (e) {
+                  toast.error(isDataError(e) ? e.message : "Delete failed");
+                }
+              }}
+            >
+              Delete permanently
+            </NeoButton>
+          </>
+        }
+      >
+        {/* Names the person explicitly: the drawer can be reopened on someone
+            else between opening this dialog and confirming it. */}
+        <p className="text-[0.82rem] text-ink-muted">
+          Deleting <span className="font-semibold text-ink">{p?.fullName}</span>{" "}
+          <span className="font-mono text-[0.75rem] text-ink-faint">{p?.code}</span>.
+        </p>
+        <p className="mt-2 text-[0.78rem] text-ink-muted">
+          A participant with a verified payment or a team they lead cannot be deleted —
+          settle or reassign that first.
         </p>
       </NeoModal>
     </>

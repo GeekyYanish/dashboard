@@ -802,6 +802,24 @@ export class MockRepository implements Repository {
       });
     },
 
+    remove: async (id: string) => {
+      this.assertCan("participants.erase");
+      const p = this.d.participants.find((x) => x.id === id);
+      if (!p) throw new DataError("NOT_FOUND");
+      const registrations = this.d.registrations.filter((r) => r.participantId === id);
+      const payments = this.d.payments.filter((x) => x.participantId === id);
+      if (payments.some((x) => x.status === "verified")) {
+        throw new DataError("FORBIDDEN", "This participant has a verified payment. Reject or refund it first.");
+      }
+      const destroyed = { registrations: registrations.length, payments: payments.length, teamMemberships: 0 };
+      this.log("participant.deleted", "participant", id, null, { code: p.code, destroyed });
+      // Mirrors the database's ON DELETE CASCADE from users(id).
+      for (const r of registrations) this.remove("registrations", r.id);
+      for (const x of payments) this.remove("payments", x.id);
+      this.remove("participants", id);
+      return destroyed;
+    },
+
     erase: async (id: string) => {
       this.assertCan("participants.erase");
       const p = this.d.participants.find((x) => x.id === id);

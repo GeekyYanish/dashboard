@@ -140,7 +140,15 @@ export class HttpParticipants implements ParticipantRepo {
   async findDuplicates() { return []; }
   async merge(): Promise<Participant> { throw new DataError("FORBIDDEN", "Participant merging is not part of the live console core."); }
   async exportPersonalData(id: string) { const value = await api.get<any>(`/api/v1/admin/participants/${id}`, scopeQuery()); return value ?? {}; }
-  async erase(): Promise<void> { throw new DataError("FORBIDDEN", "Participant erasure requires the approved privacy workflow."); }
+  async erase(): Promise<void> {
+    // Anonymisation has no endpoint. Deliberately not routed to `remove`:
+    // erasure promises the money trail survives, deletion destroys it.
+    throw new DataError("FORBIDDEN", "Anonymising a participant is not supported yet — the backend has no erasure endpoint. Use Delete to remove the record entirely.");
+  }
+  async remove(id: string) {
+    const value = await api.delete<{ destroyed: { registrations: number; payments: number; teamMemberships: number } }>(`/api/v1/admin/participants/${id}`);
+    return value.destroyed;
+  }
 }
 
 function toRegistration(value: any): Registration {

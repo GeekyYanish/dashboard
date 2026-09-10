@@ -132,7 +132,19 @@ export class HttpParticipants implements ParticipantRepo {
     const config = owed > 0 ? null : await api.get<{ amountInr: number }>("/api/v1/payment-receipts/config");
     return { isMinor: Boolean(participant?.dateOfBirth && new Date(participant.dateOfBirth).getTime() > new Date("2008-10-08").getTime()), docsComplete: true, missingDocs: [], amountDue: verified > 0 ? 0 : (owed || config?.amountInr || 0), amountPaid: verified };
   }
-  async create(): Promise<Participant> { throw new DataError("FORBIDDEN", "The desk can create registrations only for existing paid participants."); }
+  async create(input: Omit<Participant, "id" | "code" | "createdAt" | "isBlocked">): Promise<Participant> {
+    const value = await api.post<any>("/api/v1/admin/participants", {
+      fullName: input.fullName,
+      email: input.email,
+      phone: input.phone,
+      gender: input.gender,
+      collegeId: input.collegeId || null,
+      yearOfStudy: input.yearOfStudy || null,
+      tshirtSize: input.tshirtSize,
+      dietaryPref: input.dietaryPref,
+    });
+    return toParticipant(value);
+  }
   async update(id: string, patch: Partial<Participant>) {
     const value = await api.patch<any>(`/api/v1/admin/participants/${id}?eventId=${encodeURIComponent(selectedEventId() ?? "")}`, patch);
     return toParticipant(value);
@@ -266,7 +278,16 @@ export class HttpPayments implements PaymentRepo {
     // which is why embedded receipts rendered as nothing.
     return `/api/v1/admin/payments/${id}/receipt-file`;
   }
-  async create(): Promise<Payment> { throw new DataError("FORBIDDEN", "Payment submission belongs to the participant website; the console reviews it."); }
+  async create(input: { participantId: string; method: string; utr?: string | null }): Promise<Payment> {
+    /* Amount is not sent: the backend prices the pass from the participant's
+       own cohort and today's tier. Letting the desk name a figure would be a
+       way to undercharge, and the two would drift the moment tiers changed. */
+    return toPayment(await api.post<any>("/api/v1/admin/payments", {
+      participantId: input.participantId,
+      method: input.method,
+      transactionReference: input.utr ?? null,
+    }));
+  }
   async review(id: string, decision: "verified" | "rejected" | "resubmit", note?: string) { return toPayment(await api.post<any>(`/api/v1/admin/payments/${id}/review`, { decision: decision === "resubmit" ? "rejected" : decision, reason: note })); }
   async bulkReview(ids: string[], decision: "verified" | "rejected", note?: string) { const result = await api.post<{ updated: number }>("/api/v1/admin/payments/bulk-review", { ids, decision, reason: note }); return result.updated; }
   async runFraudSweep() { return this.list(); }

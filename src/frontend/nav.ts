@@ -91,7 +91,7 @@ export const NAV: NavSection[] = [
   {
     label: "Event day",
     items: [
-      { href: "/desk", label: "On-spot desk", icon: MonitorSmartphone, demoOnly: true },
+      { href: "/desk", label: "On-spot desk", icon: MonitorSmartphone },
       { href: "/checkin", label: "Check-in", icon: ScanLine },
       { href: "/live", label: "War room", icon: Radio },
     ],

@@ -1,5 +1,6 @@
 import { ConsoleShell } from "@/frontend/components/shell/console-shell";
 import { AuthGate } from "@/frontend/components/shell/auth-gate";
+import { DemoOnlyGate } from "@/frontend/components/shell/demo-only-gate";
 
 /**
  * Every module page lives under this group. `/desk` and `/live` sit outside it
@@ -8,7 +9,9 @@ import { AuthGate } from "@/frontend/components/shell/auth-gate";
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthGate>
-      <ConsoleShell>{children}</ConsoleShell>
+      <ConsoleShell>
+        <DemoOnlyGate>{children}</DemoOnlyGate>
+      </ConsoleShell>
     </AuthGate>
   );
 }

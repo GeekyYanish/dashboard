@@ -30,6 +30,12 @@ export interface NavItem {
   badge?: "verificationQueueDepth" | "docsPending" | "openTickets";
   /** Sub-routes that should still highlight this item. */
   match?: string[];
+  /**
+   * Served entirely by the in-browser demo store. Hidden once the console is
+   * backend-backed, because everything on these screens is generated — showing
+   * them beside real data invites acting on figures that do not exist.
+   */
+  demoOnly?: boolean;
 }
 
 export interface NavSection {
@@ -57,7 +63,7 @@ export const NAV: NavSection[] = [
         match: ["/registrations/import", "/registrations/new", "/registrations/duplicates", "/registrations/clashes", "/registrations/waitlist"],
       },
       { href: "/participants", label: "Participants", icon: Users },
-      { href: "/colleges", label: "Colleges", icon: Building2 },
+      { href: "/colleges", label: "Colleges", icon: Building2, demoOnly: true },
       { href: "/teams", label: "Teams", icon: UsersRound },
       { href: "/events", label: "Events", icon: CalendarDays },
     ],
@@ -69,7 +75,7 @@ export const NAV: NavSection[] = [
         href: "/payments",
         label: "Payments",
         icon: Wallet,
-        match: ["/payments/queue", "/payments/dues", "/payments/refunds", "/payments/settlements", "/payments/fraud", "/payments/drawer"],
+        match: ["/payments/queue", "/payments/dues", "/payments/refunds", "/payments/fraud", "/payments/drawer"],
       },
       { href: "/payments/queue", label: "Verification queue", icon: FileCheck2, badge: "verificationQueueDepth" },
     ],
@@ -77,15 +83,15 @@ export const NAV: NavSection[] = [
   {
     label: "Logistics",
     items: [
-      { href: "/documents", label: "Documents", icon: FileCheck2, badge: "docsPending" },
-      { href: "/accommodation", label: "Accommodation", icon: BedDouble },
-      { href: "/travel", label: "Travel & arrivals", icon: Plane },
+      { href: "/documents", label: "Documents", icon: FileCheck2, badge: "docsPending", demoOnly: true },
+      { href: "/accommodation", label: "Accommodation", icon: BedDouble, demoOnly: true },
+      { href: "/travel", label: "Travel & arrivals", icon: Plane, demoOnly: true },
     ],
   },
   {
     label: "Event day",
     items: [
-      { href: "/desk", label: "On-spot desk", icon: MonitorSmartphone },
+      { href: "/desk", label: "On-spot desk", icon: MonitorSmartphone, demoOnly: true },
       { href: "/checkin", label: "Check-in", icon: ScanLine },
       { href: "/live", label: "War room", icon: Radio },
     ],
@@ -93,9 +99,9 @@ export const NAV: NavSection[] = [
   {
     label: "Engage",
     items: [
-      { href: "/communications", label: "Communications", icon: Megaphone },
-      { href: "/certificates", label: "Certificates", icon: Award },
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy, badge: "openTickets" },
+      { href: "/communications", label: "Communications", icon: Megaphone, demoOnly: true },
+      { href: "/certificates", label: "Certificates", icon: Award, demoOnly: true },
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy, badge: "openTickets", demoOnly: true },
     ],
   },
   {
@@ -123,4 +129,29 @@ export function isActive(pathname: string, item: NavItem): boolean {
   if (hasOwnEntry) return false;
   if (item.match?.some((m) => pathname === m || pathname.startsWith(m + "/"))) return true;
   return pathname.startsWith(item.href + "/");
+}
+
+
+/**
+ * Routes whose data comes only from the demo store. `/payments/settlements`
+ * is not listed: bank reconciliation was removed outright rather than hidden,
+ * because it needs a statement-import endpoint the backend does not have.
+ */
+export const DEMO_ONLY_ROUTES: string[] = [
+  ...ALL_NAV_ITEMS.filter((i) => i.demoOnly).map((i) => i.href),
+  "/payments/refunds",
+  "/payments/drawer",
+];
+
+/** True when `pathname` belongs to a screen with no backend behind it. */
+export function isDemoOnlyRoute(pathname: string): boolean {
+  return DEMO_ONLY_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
+}
+
+/** The navigation, with demo-only entries dropped when live. */
+export function navFor(live: boolean): NavSection[] {
+  if (!live) return NAV;
+  return NAV
+    .map((section) => ({ ...section, items: section.items.filter((i) => !i.demoOnly) }))
+    .filter((section) => section.items.length > 0);
 }

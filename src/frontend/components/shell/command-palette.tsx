@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Search, CornerDownLeft, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ALL_NAV_ITEMS } from "@/frontend/nav";
+import { ALL_NAV_ITEMS, isDemoOnlyRoute } from "@/frontend/nav";
+import { hasApiBackend } from "@/lib/data/http/api-client";
 import { getRepo } from "@/lib/data";
 import type { Participant } from "@/lib/data/types";
 import { Kbd } from "@/frontend/components/neo";
@@ -67,6 +68,9 @@ export function CommandPalette({
   const results = useMemo<Result[]>(() => {
     const needle = q.trim().toLowerCase();
     const routes: Result[] = ALL_NAV_ITEMS.filter(
+      // Jumping to a hidden screen from the palette would sidestep the sidebar.
+      (i) => !(hasApiBackend() && isDemoOnlyRoute(i.href)),
+    ).filter(
       (i) => !needle || i.label.toLowerCase().includes(needle) || i.section.toLowerCase().includes(needle),
     ).map((i) => ({
       id: `route-${i.href}`,

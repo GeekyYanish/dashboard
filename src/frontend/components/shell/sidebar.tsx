@@ -4,7 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { NAV, isActive } from "@/frontend/nav";
+import { navFor, isActive } from "@/frontend/nav";
+import { hasApiBackend } from "@/lib/data/http/api-client";
 import { FEST } from "@/lib/fest.config";
 import { NeoTooltip, NeoIconButton } from "@/frontend/components/neo";
 import { PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
@@ -76,7 +77,7 @@ export function Sidebar({
       </div>
 
       <nav className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-        {NAV.map((section) => (
+        {navFor(hasApiBackend()).map((section) => (
           <div key={section.label} className="mb-4">
             {!collapsed && <div className="engraved mb-1.5 px-2">{section.label}</div>}
             {collapsed && <div className="mx-auto mb-2 h-px w-6 bg-engrave" />}

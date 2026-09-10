@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { TooltipProvider } from "@/frontend/components/neo";
 import { AuthGate } from "@/frontend/components/shell/auth-gate";
+import { DemoOnlyGate } from "@/frontend/components/shell/demo-only-gate";
 
 export const metadata: Metadata = { title: "On-spot desk" };
 
@@ -13,7 +14,9 @@ export const metadata: Metadata = { title: "On-spot desk" };
 export default function DeskLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthGate>
-      <TooltipProvider>{children}</TooltipProvider>
+      <TooltipProvider>
+        <DemoOnlyGate>{children}</DemoOnlyGate>
+      </TooltipProvider>
     </AuthGate>
   );
 }

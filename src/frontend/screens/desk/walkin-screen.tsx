@@ -12,6 +12,7 @@ import {
   toast,
 } from "@/frontend/components/neo";
 import { useAsync } from "@/frontend/hooks/use-async";
+import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
 import { isDataError, type Participant, type FestEvent } from "@/lib/data/types";
 import { PAYMENT_METHODS, inr } from "@/lib/fest.config";
@@ -32,13 +33,19 @@ import { PAYMENT_METHODS, inr } from "@/lib/fest.config";
 export function WalkInScreen() {
   const events = useAsync(() => getRepo().events.list(), []);
   const tiers = useAsync(() => getRepo().payments.entryPassTiers(), []);
+  const lookups = useLookups();
+  const courses = useAsync(() => getRepo().colleges.courses(), []);
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Participant[] | null>(null);
   const [person, setPerson] = useState<Participant | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [draft, setDraft] = useState({ fullName: "", email: "", phone: "" });
+  const [draft, setDraft] = useState({
+    fullName: "", email: "", phone: "", collegeId: "", customCollegeName: "",
+    department: "", yearOfStudy: "", gender: "other", dateOfBirth: "",
+    tshirtSize: "M", dietaryPref: "veg", emergencyName: "", emergencyPhone: "",
+  });
   const [eventId, setEventId] = useState("");
   const [method, setMethod] = useState("cash");
   const [reference, setReference] = useState("");
@@ -47,7 +54,11 @@ export function WalkInScreen() {
 
   function reset() {
     setPerson(null); setResults(null); setQuery("");
-    setDraft({ fullName: "", email: "", phone: "" });
+    setDraft({
+      fullName: "", email: "", phone: "", collegeId: "", customCollegeName: "",
+      department: "", yearOfStudy: "", gender: "other", dateOfBirth: "",
+      tshirtSize: "M", dietaryPref: "veg", emergencyName: "", emergencyPhone: "",
+    });
     setEventId(""); setReference(""); setEnrolled([]); setPaid(null);
   }
 
@@ -68,16 +79,16 @@ export function WalkInScreen() {
         fullName: draft.fullName.trim(),
         email: draft.email.trim(),
         phone: draft.phone.trim(),
-        gender: "other",
-        dateOfBirth: "",
-        collegeId: "",
-        department: "",
-        yearOfStudy: 0,
+        gender: draft.gender as Participant["gender"],
+        dateOfBirth: draft.dateOfBirth,
+        collegeId: draft.collegeId,
+        department: draft.department,
+        yearOfStudy: Number(draft.yearOfStudy) || 0,
         category: "participant",
-        tshirtSize: "M",
-        emergencyName: "",
-        emergencyPhone: "",
-        dietaryPref: "veg",
+        tshirtSize: draft.tshirtSize as Participant["tshirtSize"],
+        emergencyName: draft.emergencyName,
+        emergencyPhone: draft.emergencyPhone,
+        dietaryPref: draft.dietaryPref as Participant["dietaryPref"],
         notes: null,
         createdVia: "on_spot",
       } as Omit<Participant, "id" | "code" | "createdAt" | "isBlocked">);
@@ -132,7 +143,7 @@ export function WalkInScreen() {
       </NeoCard>
 
       {/* 1 — who is at the desk */}
-      <NeoCard>
+      <NeoCard className="lg:col-span-2">
         <NeoCard.Header eyebrow="Step 1" title="Find or add the person" />
         <NeoCard.Body className="space-y-3">
           {person ? (
@@ -183,9 +194,106 @@ export function WalkInScreen() {
               ) : null}
 
               <SectionRule label="Or add a new one" />
-              <NeoInput label="Full name" value={draft.fullName} onChange={(e) => setDraft((d) => ({ ...d, fullName: e.target.value }))} required />
-              <NeoInput label="Email" type="email" value={draft.email} onChange={(e) => setDraft((d) => ({ ...d, email: e.target.value }))} required />
-              <NeoInput label="Phone" value={draft.phone} onChange={(e) => setDraft((d) => ({ ...d, phone: e.target.value }))} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <NeoInput
+                  label="Full name"
+                  required
+                  value={draft.fullName}
+                  onChange={(e) => setDraft((d) => ({ ...d, fullName: e.target.value }))}
+                  placeholder="As it should appear on the badge"
+                />
+                <NeoInput
+                  label="Phone"
+                  mono
+                  value={draft.phone}
+                  onChange={(e) => setDraft((d) => ({ ...d, phone: e.target.value }))}
+                  placeholder="10-digit mobile"
+                  hint="Used to detect duplicates"
+                />
+                {/* Required, unlike the old kiosk which allowed a blank. The
+                    account is keyed on email and users.email is NOT NULL. */}
+                <NeoInput
+                  label="Email"
+                  type="email"
+                  required
+                  value={draft.email}
+                  onChange={(e) => setDraft((d) => ({ ...d, email: e.target.value }))}
+                  hint="The account is keyed on this"
+                />
+                <NeoInput
+                  label="Date of birth"
+                  type="date"
+                  value={draft.dateOfBirth}
+                  onChange={(e) => setDraft((d) => ({ ...d, dateOfBirth: e.target.value }))}
+                  hint="Under 18 needs guardian consent"
+                />
+                <NeoSelect
+                  label="College"
+                  value={draft.collegeId}
+                  onChange={(e) => setDraft((d) => ({ ...d, collegeId: e.target.value }))}
+                  options={[
+                    { value: "", label: "Choose…" },
+                    ...lookups.colleges.map((c) => ({ value: c.id, label: c.shortName })),
+                  ]}
+                />
+                <NeoSelect
+                  label="Department"
+                  value={draft.department}
+                  onChange={(e) => setDraft((d) => ({ ...d, department: e.target.value }))}
+                  options={[
+                    { value: "", label: "Choose…" },
+                    ...(courses.data ?? []).map((c) => ({ value: c.id, label: c.name })),
+                  ]}
+                />
+                <NeoSelect
+                  label="Gender"
+                  value={draft.gender}
+                  onChange={(e) => setDraft((d) => ({ ...d, gender: e.target.value }))}
+                  options={[
+                    { value: "male", label: "Male" },
+                    { value: "female", label: "Female" },
+                    { value: "other", label: "Other" },
+                  ]}
+                />
+                <NeoSelect
+                  label="Year"
+                  value={draft.yearOfStudy}
+                  onChange={(e) => setDraft((d) => ({ ...d, yearOfStudy: e.target.value }))}
+                  options={[
+                    { value: "", label: "Choose…" },
+                    ...["1", "2", "3", "4"].map((y) => ({ value: y, label: `Year ${y}` })),
+                  ]}
+                />
+                <NeoSelect
+                  label="T-shirt"
+                  value={draft.tshirtSize}
+                  onChange={(e) => setDraft((d) => ({ ...d, tshirtSize: e.target.value }))}
+                  options={["XS", "S", "M", "L", "XL", "XXL"].map((t) => ({ value: t, label: t }))}
+                />
+                <NeoSelect
+                  label="Dietary"
+                  value={draft.dietaryPref}
+                  onChange={(e) => setDraft((d) => ({ ...d, dietaryPref: e.target.value }))}
+                  options={[
+                    { value: "veg", label: "Vegetarian" },
+                    { value: "non_veg", label: "Non-vegetarian" },
+                    { value: "vegan", label: "Vegan" },
+                    { value: "jain", label: "Jain" },
+                  ]}
+                />
+                <NeoInput
+                  label="Emergency contact"
+                  value={draft.emergencyName}
+                  onChange={(e) => setDraft((d) => ({ ...d, emergencyName: e.target.value }))}
+                  placeholder="Name and relation"
+                />
+                <NeoInput
+                  label="Emergency phone"
+                  mono
+                  value={draft.emergencyPhone}
+                  onChange={(e) => setDraft((d) => ({ ...d, emergencyPhone: e.target.value }))}
+                />
+              </div>
               <NeoButton
                 icon={<UserPlus />}
                 onClick={createPerson}

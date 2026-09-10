@@ -318,6 +318,13 @@ export interface CollegeRepo {
     }[]
   >;
   setVerified(id: string, verified: boolean): Promise<College>;
+  /**
+   * Academic programmes, for the desk form's Department field. Sits here
+   * rather than in a slice of its own: both are institution reference data
+   * the walk-in form needs, and `profiles.course_id` is a foreign key, so the
+   * field has to be a choice from this list rather than free text.
+   */
+  courses(): Promise<{ id: string; name: string }[]>;
 }
 
 export interface EventRepo {

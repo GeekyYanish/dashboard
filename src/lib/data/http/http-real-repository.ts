@@ -138,10 +138,16 @@ export class HttpParticipants implements ParticipantRepo {
       email: input.email,
       phone: input.phone,
       gender: input.gender,
+      dateOfBirth: input.dateOfBirth || null,
       collegeId: input.collegeId || null,
+      // `department` carries a course id at the desk; the read path returns
+      // the course's name in the same field.
+      courseId: input.department || null,
       yearOfStudy: input.yearOfStudy || null,
       tshirtSize: input.tshirtSize,
       dietaryPref: input.dietaryPref,
+      emergencyName: input.emergencyName || null,
+      emergencyPhone: input.emergencyPhone || null,
     });
     return toParticipant(value);
   }
@@ -492,5 +498,8 @@ export class HttpColleges implements CollegeRepo {
   }
   async setVerified(id: string, verified: boolean): Promise<College> {
     return await api.patch<College>(`/api/v1/admin/colleges/${id}`, { isVerified: verified });
+  }
+  async courses() {
+    return await api.get<{ id: string; name: string }[]>("/api/v1/admin/courses");
   }
 }

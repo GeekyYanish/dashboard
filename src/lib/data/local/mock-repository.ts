@@ -1767,6 +1767,14 @@ export class MockRepository implements Repository {
   // =========================================================================
 
   colleges = {
+    courses: async () => [
+      { id: "1", name: "BCA" },
+      { id: "2", name: "MCA" },
+      { id: "3", name: "BSc Computer Science" },
+      { id: "4", name: "BTech Computer Science" },
+      { id: "5", name: "Other" },
+    ],
+
     list: async () => clone(this.d.colleges),
     get: async (id: string) => clone(this.d.colleges.find((c) => c.id === id) ?? null),
 

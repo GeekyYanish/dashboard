@@ -382,7 +382,17 @@ function ReceiptView({ payment }: { payment: Payment }) {
     <div className="flex size-full flex-col">
       {isPdf ? (
         <iframe
-          src={receipt.data}
+          /* PDF open parameters, not query string — they belong to the viewer,
+             so the fragment never reaches the API route.
+               toolbar=0   drops the page/zoom/rotate/draw/print/download bar
+               navpanes=0  drops the thumbnail rail, which ate a third of the width
+               view=FitH   fits page width, so the amount and UTR are legible
+                           in a 3:4 drawer instead of a postage stamp
+             Chrome (PDFium) honours all three; Firefox ignores toolbar and
+             navpanes and shows its own chrome, which is a cosmetic difference,
+             not a broken preview. The filename and an "Open in new tab" link
+             sit in the footer below, so nothing hidden here is lost. */
+          src={`${receipt.data}#toolbar=0&navpanes=0&view=FitH`}
           title={`Payment receipt — ${name}`}
           // min-h-0 matters: without it the iframe's default intrinsic height
           // wins over flex-1 and the viewer collapses.

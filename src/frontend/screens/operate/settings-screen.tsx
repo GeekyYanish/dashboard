@@ -26,6 +26,7 @@ import {
   NeoAvatar,
   NeoModal,
   toast,
+  NeoSkeleton,
   type Column,
 } from "@/frontend/components/neo";
 import { useAsync } from "@/frontend/hooks/use-async";
@@ -55,6 +56,22 @@ type Tab = "fest" | "fees" | "roles" | "privacy" | "display";
  * enforced in the repository (they throw FORBIDDEN), not merely hidden in the
  * UI. The role picker exists so that can actually be demonstrated.
  */
+/** Badge colours for the entry-pass tiers, matching the payment status palette. */
+const TIER_BADGE: Record<string, string> = {
+  early_bird: "#2c7f52",
+  standard: "#3a6595",
+  on_the_spot: "#a97614",
+  christite: "#2c7f52",
+  international: "#8b5cf6",
+};
+
+/** "17 Aug – 9 Sep". The year is the fest's own, so it adds nothing. */
+function tierWindow(tier: { from: string; to: string }): string {
+  const fmt = (iso: string) =>
+    new Date(`${iso}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  return `${fmt(tier.from)} – ${fmt(tier.to)}`;
+}
+
 export function SettingsScreen({ initialTab = "fest" }: { initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const { theme, setTheme, density, setDensity, reduceMotion, setReduceMotion } = usePrefs();
@@ -63,6 +80,7 @@ export function SettingsScreen({ initialTab = "fest" }: { initialTab?: Tab }) {
   const staff = useAsync(() => getRepo().staff.list(), []);
   const actor = useAsync(() => getRepo().admin.actor(), []);
   const coupons = useAsync(() => getRepo().coupons.list(), []);
+  const tiers = useAsync(() => getRepo().payments.entryPassTiers(), []);
 
   const couponCols: Column<Coupon>[] = [
     {
@@ -186,27 +204,41 @@ export function SettingsScreen({ initialTab = "fest" }: { initialTab?: Tab }) {
 
           <div className="space-y-4">
             <NeoCard>
-              <NeoCard.Header eyebrow="Form" title="Registrant categories" />
+              <NeoCard.Header
+                eyebrow="Form"
+                title="Registrant categories"
+                subtitle="One pass covers every event. The date tiers apply by default; Christite and International override them for the whole fest."
+              />
               <NeoCard.Body flush>
-                <ul className="divide-y divide-hairline">
-                  {CATEGORIES.map((c) => (
-                    <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
-                      <span
-                        className="size-3 shrink-0 rounded-[4px]"
-                        style={{ background: c.badge }}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[0.83rem] font-medium text-ink">{c.label}</span>
-                        <span className="block truncate text-[0.72rem] text-ink-muted">
-                          {c.blurb}
+                {tiers.loading ? (
+                  <div className="px-4 py-3">
+                    <NeoSkeleton className="h-24 w-full" />
+                  </div>
+                ) : tiers.data?.length ? (
+                  <ul className="divide-y divide-hairline">
+                    {tiers.data.map((t) => (
+                      <li key={t.id} className="flex items-center gap-3 px-4 py-2.5">
+                        <span
+                          className="size-3 shrink-0 rounded-[4px]"
+                          style={{ background: TIER_BADGE[t.id] ?? "#6b7280" }}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[0.83rem] font-medium text-ink">{t.label}</span>
+                          <span className="block truncate text-[0.72rem] text-ink-muted">
+                            {tierWindow(t)}
+                          </span>
                         </span>
-                      </span>
-                      <span className="tnum shrink-0 text-[0.8rem] font-semibold text-ink">
-                        {inr(c.baseFee)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                        <span className="tnum shrink-0 text-[0.8rem] font-semibold text-ink">
+                          {inr(t.amountInr)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="px-4 py-3 text-[0.78rem] text-ink-muted">
+                    The fee schedule could not be loaded.
+                  </p>
+                )}
               </NeoCard.Body>
             </NeoCard>
 

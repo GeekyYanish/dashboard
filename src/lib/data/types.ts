@@ -17,6 +17,20 @@ import type { CategoryId, DocTypeId, PaymentMethodId, StaffRoleId, TrackId } fro
 // Reference data
 // ---------------------------------------------------------------------------
 
+/**
+ * One row of the entry-pass fee schedule. One pass covers every event, so this
+ * is the only ticket price in the system: three date tiers and two cohort
+ * rates that override them.
+ */
+export interface PassTier {
+  id: "early_bird" | "standard" | "on_the_spot" | "christite" | "international";
+  label: string;
+  amountInr: number;
+  /** Inclusive IST calendar dates. */
+  from: string;
+  to: string;
+}
+
 export interface College {
   id: string;
   name: string;

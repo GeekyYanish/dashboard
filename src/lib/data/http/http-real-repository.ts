@@ -3,7 +3,7 @@ import { api } from "./api-client";
 import { selectedEventId } from "./scope";
 import type { AuthRepo, AuditRepo, OverviewRepo, ParticipantRepo, RegistrationRepo, PaymentRepo, EventRepo, TeamRepo, StaffRepo, AdminRepo, CollegeRepo, Actor, ImportPreview } from "../repository";
 import type { Session } from "../../auth/session";
-import type { AttentionItem, AuditEvent, Announcement, College, EventStats, FestEvent, OverviewStats, Participant, ParticipantFlags, Payment, PaymentStatus, Registration, RegistrationStatus, StaffMember, SubstitutionRequest, Team } from "../types";
+import type { AttentionItem, AuditEvent, Announcement, College, PassTier, EventStats, FestEvent, OverviewStats, Participant, ParticipantFlags, Payment, PaymentStatus, Registration, RegistrationStatus, StaffMember, SubstitutionRequest, Team } from "../types";
 import { DataError, isDataError } from "../types";
 import { type PaymentMethodId, type StaffRoleId } from "../../fest.config";
 
@@ -225,6 +225,11 @@ function toPayment(value: any): Payment {
 }
 
 export class HttpPayments implements PaymentRepo {
+  /** Straight from the backend, so the console can never quote a stale price. */
+  async entryPassTiers(): Promise<PassTier[]> {
+    const config = await api.get<{ tiers?: PassTier[] }>("/api/v1/payment-receipts/config");
+    return config.tiers ?? [];
+  }
   async list(filter: any = {}) {
     const result = await api.get<any>("/api/v1/admin/payments", { status: filter.status?.[0], participantId: filter.participantId, limit: 200 });
     return (result.items ?? []).map(toPayment).filter((payment: Payment) => !filter.method || (payment.method != null && filter.method.includes(payment.method)));

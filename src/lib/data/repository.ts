@@ -51,6 +51,7 @@ import type {
   SubstitutionRequest,
   Team,
   TravelRecord,
+  PassTier,
 } from "./types";
 
 export interface Repository {
@@ -224,6 +225,8 @@ export interface PaymentFilter {
 }
 
 export interface PaymentRepo {
+  /** The entry-pass fee schedule the backend prices against. */
+  entryPassTiers(): Promise<PassTier[]>;
   list(filter?: PaymentFilter): Promise<Payment[]>;
   get(id: string): Promise<Payment | null>;
   forParticipant(participantId: string): Promise<Payment[]>;

@@ -1219,6 +1219,14 @@ export class MockRepository implements Repository {
   // =========================================================================
 
   payments = {
+    /** Mirrors the backend's schedule so the offline demo quotes the same fees. */
+    entryPassTiers: async () => [
+      { id: "early_bird" as const, label: "Early bird", amountInr: 200, from: "2026-08-17", to: "2026-09-09" },
+      { id: "standard" as const, label: "Standard", amountInr: 250, from: "2026-09-10", to: "2026-10-07" },
+      { id: "on_the_spot" as const, label: "On the spot", amountInr: 300, from: "2026-10-08", to: "2026-10-09" },
+      { id: "christite" as const, label: "Christite", amountInr: 200, from: "2026-08-17", to: "2026-10-09" },
+      { id: "international" as const, label: "International", amountInr: 1000, from: "2026-08-17", to: "2026-10-09" },
+    ],
     list: async (filter?: PaymentFilter): Promise<Payment[]> => {
       let rows = this.d.payments;
       if (filter?.status?.length) rows = rows.filter((p) => filter.status!.includes(p.status));

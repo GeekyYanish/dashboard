@@ -393,7 +393,27 @@ export class HttpStaff implements StaffRepo {
     const eventId = input.role === "head" ? null : input.eventId;
     if (input.role !== "head" && !eventId) throw new DataError("VALIDATION_FAILED", "Select an event for an organizer or scanner.");
     const created = await api.post<{ id: string }>("/api/v1/admin/staff", { name: input.name, email: input.email, phone: input.phone, temporaryPassword: input.temporaryPassword, assignments: [{ role, eventId }] });
-    return (await this.list()).find((value) => value.id === created.id)!;
+    /* Built from the response rather than re-reading the list. The account
+       already exists by this point, so letting a failed follow-up read reject
+       this call reported "could not create staff account" for an account that
+       had just been created — and the caller then skipped its success path and
+       left the dialog open. */
+    return {
+      id: created.id,
+      name: input.name,
+      email: input.email,
+      phone: input.phone || "—",
+      role: input.role,
+      assignments: [{ id: created.id, role: input.role, eventId }],
+      isActive: true,
+      joinedAt: new Date().toISOString(),
+      passwordHash: "",
+      passwordSalt: "",
+      mustChangePassword: true,
+      lastLoginAt: null,
+      failedAttempts: 0,
+      lockedUntil: null,
+    } as StaffMember;
   }
   async grantAssignment(id: string, role: StaffRoleId, eventId: string | null) {
     const backendRole = backendStaffRole(role);

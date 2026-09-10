@@ -361,7 +361,7 @@ export function TeamScreen() {
             <NeoButton
               variant="primary"
               loading={createBusy}
-              disabled={!newStaff.name.trim() || !newStaff.email.trim() || !newStaff.phone.trim() || newStaff.temporaryPassword.length < 8 || !getRepo().staff.create}
+              disabled={!newStaff.name.trim() || !newStaff.email.trim() || !newStaff.phone.trim() || newStaff.temporaryPassword.length < 10 || !getRepo().staff.create}
               onClick={async () => {
                 const createStaff = getRepo().staff.create;
                 if (!createStaff) return;
@@ -374,7 +374,7 @@ export function TeamScreen() {
                   setNewStaff({ name: "", email: "", phone: "", temporaryPassword: "", role: "desk", eventId: "" });
                   staff.reload();
                 } catch (err) {
-                  setCreateError(isDataError(err) ? err.message : "Could not create staff account.");
+                  setCreateError(isDataError(err) ? err.message : "The account may have been created — reload the roster before trying again.");
                 } finally {
                   setCreateBusy(false);
                 }
@@ -387,7 +387,7 @@ export function TeamScreen() {
           <NeoInput label="Full name" value={newStaff.name} onChange={(event) => setNewStaff((current) => ({ ...current, name: event.target.value }))} required />
           <NeoInput label="Email" type="email" value={newStaff.email} onChange={(event) => setNewStaff((current) => ({ ...current, email: event.target.value }))} required />
           <NeoInput label="Phone" value={newStaff.phone} onChange={(event) => setNewStaff((current) => ({ ...current, phone: event.target.value }))} required />
-          <NeoInput label="Temporary password" type="password" hint="At least 8 characters" value={newStaff.temporaryPassword} onChange={(event) => setNewStaff((current) => ({ ...current, temporaryPassword: event.target.value }))} required />
+          <NeoInput label="Temporary password" type="password" hint="At least 10 characters" value={newStaff.temporaryPassword} onChange={(event) => setNewStaff((current) => ({ ...current, temporaryPassword: event.target.value }))} required />
           <NeoSelect label="Initial role" value={newStaff.role} onChange={(event) => setNewStaff((current) => ({ ...current, role: event.target.value as StaffRoleId, eventId: event.target.value === "head" ? "" : current.eventId }))} options={CORE_STAFF_ROLES.map((role) => ({ value: role.id, label: role.label }))} />
           {newStaff.role !== "head" ? <NeoSelect label="Assigned event" value={newStaff.eventId || events.data?.[0]?.id || ""} onChange={(event) => setNewStaff((current) => ({ ...current, eventId: event.target.value }))} options={(events.data ?? []).map((event) => ({ value: event.id, label: event.title }))} /> : null}
           {createError ? <p className="rounded-neo bg-failed-bg p-2.5 text-[0.78rem] text-failed" role="alert">{createError}</p> : null}

@@ -123,8 +123,14 @@ export class HttpParticipants implements ParticipantRepo {
     const detail = await api.get<any>(`/api/v1/admin/participants/${id}`, scopeQuery());
     const payment = detail?.participant?.payment;
     const verified = payment?.status === "verified" ? Number(payment.amountInr ?? 0) : 0;
-    const config = await api.get<{ amountInr: number }>("/api/v1/payment-receipts/config");
-    return { isMinor: Boolean(participant?.dateOfBirth && new Date(participant.dateOfBirth).getTime() > new Date("2008-10-08").getTime()), docsComplete: true, missingDocs: [], amountDue: verified > 0 ? 0 : config.amountInr, amountPaid: verified };
+    /* What THIS participant owes, not what a walk-up would pay today. Entry-pass
+       pricing is tiered by date, so reading the current tier here showed "total
+       due ₹250" beside a "₹200" fee breakdown for someone who paid during early
+       bird. Their own payment already carries the right figure; the current
+       tier is only the fallback for someone who has not paid at all. */
+    const owed = payment ? Number(payment.amountInr ?? 0) : 0;
+    const config = owed > 0 ? null : await api.get<{ amountInr: number }>("/api/v1/payment-receipts/config");
+    return { isMinor: Boolean(participant?.dateOfBirth && new Date(participant.dateOfBirth).getTime() > new Date("2008-10-08").getTime()), docsComplete: true, missingDocs: [], amountDue: verified > 0 ? 0 : (owed || config?.amountInr || 0), amountPaid: verified };
   }
   async create(): Promise<Participant> { throw new DataError("FORBIDDEN", "The desk can create registrations only for existing paid participants."); }
   async update(id: string, patch: Partial<Participant>) {

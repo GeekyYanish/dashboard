@@ -115,9 +115,12 @@ export const ALL_NAV_ITEMS = NAV.flatMap((s) => s.items.map((i) => ({ ...i, sect
 export function isActive(pathname: string, item: NavItem): boolean {
   if (item.href === "/") return pathname === "/";
   if (pathname === item.href) return true;
-  if (item.match?.some((m) => pathname === m || pathname.startsWith(m + "/"))) return true;
-  // /payments should not light up when /payments/queue has its own entry.
+  // Checked BEFORE `match`, not after. "Payments" lists /payments/queue in its
+  // match array, so on that path it matched here and returned true before this
+  // guard ever ran — lighting up both it and "Verification queue", which owns
+  // the path outright.
   const hasOwnEntry = ALL_NAV_ITEMS.some((i) => i.href === pathname && i.href !== item.href);
   if (hasOwnEntry) return false;
+  if (item.match?.some((m) => pathname === m || pathname.startsWith(m + "/"))) return true;
   return pathname.startsWith(item.href + "/");
 }

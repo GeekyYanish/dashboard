@@ -294,7 +294,14 @@ export class HttpPayments implements PaymentRepo {
       transactionReference: input.utr ?? null,
     }));
   }
-  async review(id: string, decision: "verified" | "rejected" | "resubmit", note?: string) { return toPayment(await api.post<any>(`/api/v1/admin/payments/${id}/review`, { decision: decision === "resubmit" ? "rejected" : decision, reason: note })); }
+  async review(id: string, decision: "verified" | "rejected" | "resubmit", note?: string) {
+    /* `resubmit` is sent as itself. It used to be flattened to "rejected"
+       here, which meant the backend could not tell a request for a clearer
+       receipt from a refusal — and the participant would be emailed as though
+       they had been refused. The stored status is still 'rejected' (the enum
+       has no third state); the distinction lives on the wire. */
+    return toPayment(await api.post<any>(`/api/v1/admin/payments/${id}/review`, { decision, reason: note }));
+  }
   async bulkReview(ids: string[], decision: "verified" | "rejected", note?: string) { const result = await api.post<{ updated: number }>("/api/v1/admin/payments/bulk-review", { ids, decision, reason: note }); return result.updated; }
   async runFraudSweep() { return this.list(); }
   async outstanding() { return []; }

@@ -35,8 +35,14 @@ import { PAYMENT_METHODS, inr } from "@/lib/fest.config";
 import { slaLabel, slaTone, titleCase } from "@/frontend/status";
 import { cn, hoursSince, relativeTime } from "@/lib/utils";
 
+/**
+ * Reasons a payment is refused outright. "Screenshot unreadable — please
+ * re-upload" used to head this list and was its default, which is the exact
+ * conflation the separate re-upload outcome removes: an unreadable receipt is
+ * a request for a better one, not a refusal, and the two now send different
+ * emails.
+ */
 const REJECT_REASONS = [
-  "Screenshot unreadable — please re-upload",
   "UTR does not match any bank credit",
   "Amount short of the fee due",
   "Receipt belongs to a different participant",
@@ -74,15 +80,21 @@ export function QueueScreen() {
       setBusy(true);
       try {
         const res = await getRepo().payments.review(current.id, decision, note);
+        /* Naming the address makes the outcome checkable: the reviewer can see
+           that the participant was told, and which address it went to, without
+           opening the audit log. */
+        const notified = lookups.participant(current.participantId)?.email;
+        const detail =
+          decision === "verified" && res.invoiceSerial
+            ? `Invoice ${res.invoiceSerial} issued; registrations confirmed.`
+            : note;
         toast.success(
           decision === "verified"
             ? `Verified ${inr(current.amount)}`
             : decision === "rejected"
               ? "Payment rejected"
               : "Re-upload requested",
-          decision === "verified" && res.invoiceSerial
-            ? `Invoice ${res.invoiceSerial} issued; registrations confirmed.`
-            : note,
+          [detail, notified ? `Emailed ${notified}.` : null].filter(Boolean).join(" "),
         );
         advance();
         queue.reload();
@@ -92,7 +104,7 @@ export function QueueScreen() {
         setBusy(false);
       }
     },
-    [current, advance, queue],
+    [current, advance, queue, lookups],
   );
 
   // Keyboard driver. Inert while a field has focus so typing a reject note

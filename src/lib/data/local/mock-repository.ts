@@ -317,8 +317,8 @@ export class MockRepository implements Repository {
   // =========================================================================
 
   /** Five failures locks the account for a minute. */
-  private static readonly MAX_ATTEMPTS = 5;
-  private static readonly LOCKOUT_MS = 60_000;
+  // private static readonly MAX_ATTEMPTS = 5;
+  // private static readonly LOCKOUT_MS = 60_000;
 
   auth = {
     signIn: async (email: string, password: string): Promise<Session> => {
@@ -331,19 +331,21 @@ export class MockRepository implements Repository {
       if (!staff) throw new DataError("INVALID_CREDENTIALS", "Email or password is incorrect");
       if (!staff.isActive) throw new DataError("ACCOUNT_DISABLED", "This account is disabled");
 
-      if (staff.lockedUntil && new Date(staff.lockedUntil) > now()) {
-        const secs = Math.ceil((new Date(staff.lockedUntil).getTime() - now().getTime()) / 1000);
-        throw new DataError("ACCOUNT_LOCKED", `Too many attempts — try again in ${secs}s`);
-      }
+      // Commented out: timeout after repeated failed attempts
+      // if (staff.lockedUntil && new Date(staff.lockedUntil) > now()) {
+      //   const secs = Math.ceil((new Date(staff.lockedUntil).getTime() - now().getTime()) / 1000);
+      //   throw new DataError("ACCOUNT_LOCKED", `Too many attempts — try again in ${secs}s`);
+      // }
 
       const ok = await verifyPassword(password, staff.passwordHash, staff.passwordSalt);
       if (!ok) {
-        staff.failedAttempts += 1;
-        if (staff.failedAttempts >= MockRepository.MAX_ATTEMPTS) {
-          staff.lockedUntil = new Date(now().getTime() + MockRepository.LOCKOUT_MS).toISOString();
-          staff.failedAttempts = 0;
-        }
-        this.save("staff", staff);
+        // Commented out: account lock after 5 attempts
+        // staff.failedAttempts += 1;
+        // if (staff.failedAttempts >= MockRepository.MAX_ATTEMPTS) {
+        //   staff.lockedUntil = new Date(now().getTime() + MockRepository.LOCKOUT_MS).toISOString();
+        //   staff.failedAttempts = 0;
+        // }
+        // this.save("staff", staff);
         throw new DataError("INVALID_CREDENTIALS", "Email or password is incorrect");
       }
 

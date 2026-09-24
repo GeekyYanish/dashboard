@@ -29,16 +29,41 @@ that is the proxy reporting it could not reach the API, not a console bug.
 
 ## Sign in
 
-There are **no built-in accounts**, by design. The console has no login form of
-its own: staff authenticate on the Gateways website and are handed across, and
-the console never sees a password.
+There are **no built-in accounts**, by design. `/login` takes an email and
+password, or hands off to Google via the website. Either way the console never
+holds the credential: the bearer token goes straight into an httpOnly cookie and
+the proxy attaches it server-side.
 
 1. **Sign up on the website** (`NEXT_PUBLIC_WEBSITE_URL`) and verify the email.
    In development the verification code is printed to the backend's console as a
    `[DEV EMAIL LOG]` line — no SMTP required.
-2. **Grant a staff role from the CLI** (see below).
-3. **Open the console.** The session arrives over the handoff; unsigned-in
-   visitors are sent to the website rather than shown a password box.
+2. **Grant a staff role** from the CLI (see below) or from the console's Team
+   screen.
+3. **Open the console.** A password sign-in on an account still holding a
+   temporary password lands on `/login/set-password` and goes no further until
+   it is changed.
+
+### Losing a password
+
+Two routes, because they fail in different directions:
+
+- **The staff member still reads the email on the account** — `/login` →
+  **Forgot password?**. A six-digit code goes to that address, ten minutes to
+  use it, thirty seconds between requests. In development the code is printed to
+  the backend's terminal in the same `[DEV EMAIL LOG]` box. Setting a password
+  this way clears the forced-rotation flag, so they sign in straight to the
+  console.
+- **They do not** — a Registration Head opens **Team**, finds the row and hits
+  **Reset password**. That sets a temporary password, ends every live session on
+  that account, and forces a change on the next sign-in. The password is shown
+  once, in the dialog, for the head to relay by hand.
+
+  There is no email option here on purpose: the only mail transport the backend
+  has takes an OTP and nothing else, so a console that offered to "email the new
+  password" would be offering something it cannot do.
+
+A head can reset anyone on the roster except themselves — that would revoke the
+session making the request. Their own route is the ordinary password change.
 
 ### Granting roles
 

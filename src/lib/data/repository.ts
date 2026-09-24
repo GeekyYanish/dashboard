@@ -463,7 +463,17 @@ export interface StaffRepo {
     temporaryPassword: string;
     role: StaffRoleId;
     eventId: string | null;
-  }): Promise<StaffMember>;
+    /** `true` when the email already had an account that was promoted rather
+     *  than a new one created — the caller says so, because the two outcomes
+     *  need different wording. */
+  }): Promise<StaffMember & { promoted?: boolean }>;
+  /**
+   * A Registration Head setting someone else's password — the only recovery
+   * path for a staff member who never received their temporary one and cannot
+   * reach the email on the account. Forces a change on next sign-in and ends
+   * that member's live sessions.
+   */
+  resetPassword?(id: string, temporaryPassword: string): Promise<void>;
   grantAssignment?(id: string, role: StaffRoleId, eventId: string | null): Promise<StaffMember>;
   revokeAssignment?(id: string, assignmentId: string): Promise<StaffMember>;
   /** Verifications done, walk-ins handled, tickets closed — per member. */

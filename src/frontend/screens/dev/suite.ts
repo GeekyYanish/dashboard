@@ -215,6 +215,61 @@ export const SUITE: { group: string; name: string; fn: TestFn }[] = [
   },
   {
     group: "Auth",
+    name: "A head resets another member's password and forces a rotation",
+    fn: async ({ assert, repo }) => {
+      await signInAs("head");
+      const reset = repo.staff.resetPassword;
+      assert(Boolean(reset), "the repository exposes no password reset");
+
+      const target = (await repo.staff.list()).find((m) => m.email === ACCOUNTS.desk.email)!;
+      await reset!(target.id, "Console#Relay41");
+
+      await repo.auth.signOut();
+      try {
+        await repo.auth.signIn(ACCOUNTS.desk.email, ACCOUNTS.desk.password);
+        assert(false, "the old password still works after a reset");
+      } catch (e) {
+        assert(isDataError(e) && e.code === "INVALID_CREDENTIALS", "unexpected error for the old password");
+      }
+
+      const session = await repo.auth.signIn(ACCOUNTS.desk.email, "Console#Relay41");
+      assert(session.mustChangePassword, "a reset password was not marked must-change");
+
+      // Leave the seeded credential as it was — every later case signs in with it.
+      await repo.auth.changePassword("Console#Relay41", ACCOUNTS.desk.password);
+      await signInAs("head");
+    },
+  },
+  {
+    group: "Auth",
+    name: "A head cannot reset their own password this way",
+    fn: async ({ assert, repo }) => {
+      const self = await signInAs("head");
+      try {
+        await repo.staff.resetPassword!(self.staffId, "Console#Relay42");
+        assert(false, "self-reset was allowed");
+      } catch (e) {
+        assert(isDataError(e) && e.code === "FORBIDDEN", "unexpected error for a self-reset");
+      }
+    },
+  },
+  {
+    group: "Auth",
+    name: "Only a head can reset a password",
+    fn: async ({ assert, repo }) => {
+      await signInAs("coordinator");
+      const target = (await repo.staff.list()).find((m) => m.email === ACCOUNTS.desk.email)!;
+      try {
+        await repo.staff.resetPassword!(target.id, "Console#Relay43");
+        assert(false, "a coordinator reset someone's password");
+      } catch (e) {
+        assert(isDataError(e) && e.code === "FORBIDDEN", "unexpected error for a non-head");
+      }
+      await signInAs("head");
+    },
+  },
+  {
+    group: "Auth",
     name: "Hashing is salted — same password, different hash",
     fn: async ({ assert }) => {
       const a = await hashPassword("Identical#Pass99");

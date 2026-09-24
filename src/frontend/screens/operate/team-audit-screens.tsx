@@ -11,6 +11,9 @@ import {
   Plus,
   Trash2,
   RotateCw,
+  KeyRound,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Page, PageHeader, StatGrid } from "@/frontend/components/page";
 import {
@@ -29,6 +32,7 @@ import {
   type Column,
 } from "@/frontend/components/neo";
 import { BarChart } from "@/frontend/components/charts";
+import { GatedButton } from "@/frontend/components/gated";
 import { FilterBar, type Facet } from "@/frontend/components/filter-bar";
 import { useAsync, useDebounced } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
@@ -36,11 +40,29 @@ import { getRepo } from "@/lib/data";
 import { isDataError, type AuditEvent, type StaffMember } from "@/lib/data/types";
 import { FEST, STAFF_ROLES, roleById } from "@/lib/fest.config";
 import { titleCase } from "@/frontend/status";
-import { downloadCsv, relativeTime } from "@/lib/utils";
+import { downloadCsv, relativeTime, cn } from "@/lib/utils";
+import { checkPassword, PASSWORD_STRENGTH_LABELS } from "@/lib/auth/crypto";
 import { useAuth } from "@/frontend/hooks/use-auth";
 import type { StaffRoleId } from "@/lib/fest.config";
 
 const CORE_STAFF_ROLES = STAFF_ROLES.filter((role) => ["head", "coordinator", "desk"].includes(role.id));
+
+/**
+ * A temporary password an administrator can read out over a desk.
+ *
+ * `crypto.getRandomValues`, not `Math.random` — this is a live credential for
+ * the window between the reset and the staff member's first sign-in, short as
+ * that is. The shape matches the backend's own bootstrap CLI so the two are
+ * recognisable as the same kind of thing, and it clears the console policy
+ * (length, upper, lower, digit) by construction.
+ */
+function generateTemporaryPassword(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(bytes);
+  const body = [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+  return `Console${body}26`;
+}
 
 /* ==========================================================================
    Team & duty roster — the registration team managing itself.
@@ -48,7 +70,7 @@ const CORE_STAFF_ROLES = STAFF_ROLES.filter((role) => ["head", "coordinator", "d
 
 export function TeamScreen() {
   const lookups = useLookups();
-  const { role: actorRole } = useAuth();
+  const { role: actorRole, session } = useAuth();
   const [view, setView] = useState<"people" | "shifts" | "workload">("people");
   const staff = useAsync(() => getRepo().staff.list(), []);
   const workload = useAsync(() => getRepo().staff.workload(), []);
@@ -58,7 +80,26 @@ export function TeamScreen() {
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [newStaff, setNewStaff] = useState({ name: "", email: "", phone: "", temporaryPassword: "", role: "desk" as StaffRoleId, eventId: "" });
+  const [resetTarget, setResetTarget] = useState<StaffMember | null>(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  /** Set once the reset has gone through — the password is shown exactly once. */
+  const [resetDone, setResetDone] = useState(false);
+  const [copied, setCopied] = useState(false);
   const canManageStaff = actorRole === "head";
+  const resetCheck = checkPassword(resetPassword, resetTarget?.email);
+
+  const openReset = (member: StaffMember) => {
+    setResetTarget(member);
+    // A password generated here rather than typed: an administrator inventing
+    // one under time pressure invents a weak one, and this is a credential that
+    // gets read out loud over a desk.
+    setResetPassword(generateTemporaryPassword());
+    setResetError(null);
+    setResetDone(false);
+    setCopied(false);
+  };
 
   const workloadMap = useMemo(
     () => new Map((workload.data ?? []).map((w) => [w.staffId, w])),
@@ -163,6 +204,37 @@ export function TeamScreen() {
       align: "right",
       sortValue: (s) => workloadMap.get(s.id)?.tickets ?? 0,
       cell: (s) => <span className="tnum text-ink-soft">{workloadMap.get(s.id)?.tickets ?? 0}</span>,
+    },
+    {
+      key: "access",
+      header: "Access",
+      width: "150px",
+      cell: (s) => {
+        // Resetting your own password here would revoke the session making the
+        // request; the backend refuses it, and there is a screen for it already.
+        if (s.id === session?.staffId) {
+          return <span className="text-[0.72rem] text-ink-faint">You</span>;
+        }
+        if (!getRepo().staff.resetPassword) {
+          return <span className="text-[0.72rem] text-ink-faint">—</span>;
+        }
+        return (
+          <div className="space-y-1">
+            <GatedButton
+              capability="staff.manageRoles"
+              size="sm"
+              variant="secondary"
+              icon={<KeyRound />}
+              onClick={() => openReset(s)}
+            >
+              Reset password
+            </GatedButton>
+            {s.mustChangePassword ? (
+              <div className="text-[0.65rem] text-pending">On a temporary password</div>
+            ) : null}
+          </div>
+        );
+      },
     },
   ];
 
@@ -368,8 +440,15 @@ export function TeamScreen() {
                 setCreateBusy(true);
                 setCreateError(null);
                 try {
-                  await createStaff({ ...newStaff, eventId: newStaff.role === "head" ? null : newStaff.eventId || events.data?.[0]?.id || null });
-                  toast.success("Staff account created", "They must change the temporary password before console access.");
+                  const created = await createStaff({ ...newStaff, eventId: newStaff.role === "head" ? null : newStaff.eventId || events.data?.[0]?.id || null });
+                  if (created.promoted) {
+                    toast.success(
+                      "Existing account promoted",
+                      "This email had already signed up. Its password is now the temporary one you set — their old website password no longer works.",
+                    );
+                  } else {
+                    toast.success("Staff account created", "They must change the temporary password before console access.");
+                  }
                   setCreateOpen(false);
                   setNewStaff({ name: "", email: "", phone: "", temporaryPassword: "", role: "desk", eventId: "" });
                   staff.reload();
@@ -391,6 +470,102 @@ export function TeamScreen() {
           <NeoSelect label="Initial role" value={newStaff.role} onChange={(event) => setNewStaff((current) => ({ ...current, role: event.target.value as StaffRoleId, eventId: event.target.value === "head" ? "" : current.eventId }))} options={CORE_STAFF_ROLES.map((role) => ({ value: role.id, label: role.label }))} />
           {newStaff.role !== "head" ? <NeoSelect label="Assigned event" value={newStaff.eventId || events.data?.[0]?.id || ""} onChange={(event) => setNewStaff((current) => ({ ...current, eventId: event.target.value }))} options={(events.data ?? []).map((event) => ({ value: event.id, label: event.title }))} /> : null}
           {createError ? <p className="rounded-neo bg-failed-bg p-2.5 text-[0.78rem] text-failed" role="alert">{createError}</p> : null}
+        </div>
+      </NeoModal>
+
+      <NeoModal
+        open={Boolean(resetTarget)}
+        onOpenChange={(open) => { if (!open) setResetTarget(null); }}
+        title={resetDone ? "Password reset" : `Reset password — ${resetTarget?.name ?? ""}`}
+        description={
+          resetDone
+            ? "Give this to them directly. The console cannot email it, and it is not shown again."
+            : "Sets a temporary password and ends this member's live sessions. They must choose their own on the next sign-in."
+        }
+        footer={
+          resetDone ? (
+            <NeoButton variant="primary" onClick={() => setResetTarget(null)}>Done</NeoButton>
+          ) : (
+            <>
+              <NeoButton variant="ghost" onClick={() => setResetTarget(null)} disabled={resetBusy}>Cancel</NeoButton>
+              <NeoButton
+                variant="primary"
+                icon={<KeyRound />}
+                loading={resetBusy}
+                disabled={!resetCheck.ok || resetBusy}
+                onClick={async () => {
+                  const reset = getRepo().staff.resetPassword;
+                  if (!reset || !resetTarget) return;
+                  setResetBusy(true);
+                  setResetError(null);
+                  try {
+                    await reset(resetTarget.id, resetPassword);
+                    setResetDone(true);
+                    staff.reload();
+                  } catch (err) {
+                    setResetError(isDataError(err) ? err.message : "Could not reset the password.");
+                  } finally {
+                    setResetBusy(false);
+                  }
+                }}
+              >Reset password</NeoButton>
+            </>
+          )
+        }
+      >
+        <div className="space-y-3">
+          <NeoInput
+            label="Temporary password"
+            mono
+            readOnly={resetDone}
+            value={resetPassword}
+            onChange={(event) => setResetPassword(event.target.value)}
+            hint={resetTarget?.email}
+          />
+
+          {resetDone ? (
+            <NeoButton
+              variant="secondary"
+              block
+              icon={copied ? <Check /> : <Copy />}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(resetPassword);
+                  setCopied(true);
+                } catch {
+                  // Clipboard access can be refused outright; the password is on
+                  // screen to be read either way, so this is not worth an error.
+                  setCopied(false);
+                }
+              }}
+            >
+              {copied ? "Copied" : "Copy password"}
+            </NeoButton>
+          ) : (
+            <>
+              <NeoButton
+                variant="ghost"
+                block
+                icon={<RotateCw />}
+                onClick={() => setResetPassword(generateTemporaryPassword())}
+              >
+                Generate another
+              </NeoButton>
+              {resetCheck.problems.length ? (
+                <ul className="space-y-1">
+                  {resetCheck.problems.map((problem) => (
+                    <li key={problem} className="text-[0.75rem] text-ink-muted">· {problem}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={cn("inline-flex items-center gap-1.5 text-[0.75rem] text-paid")}>
+                  <Check className="size-3.5" /> {PASSWORD_STRENGTH_LABELS[resetCheck.score]} — meets the policy
+                </p>
+              )}
+            </>
+          )}
+
+          {resetError ? <p className="rounded-neo bg-failed-bg p-2.5 text-[0.78rem] text-failed" role="alert">{resetError}</p> : null}
         </div>
       </NeoModal>
     </Page>

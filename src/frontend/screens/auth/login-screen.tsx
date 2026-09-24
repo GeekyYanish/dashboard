@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { KeyRound, LogIn, Mail, ShieldAlert, ShieldCheck } from "lucide-react";
 import { NeoButton, NeoCard, NeoInput } from "@/frontend/components/neo";
 import { FEST } from "@/lib/fest.config";
@@ -32,6 +33,11 @@ export function LoginScreen() {
     if (code === "handoff_expired") return "That sign-in link expired or was already used. Sign in again.";
     if (code === "backend_unavailable") return "The registration service is unavailable. Try again shortly.";
     if (code === "missing_handoff") return "The secure sign-in code was missing. Sign in again.";
+    // /auth/callback sends this one when a Google handoff lands on an account
+    // that still owes a password change. Without an entry here that redirect
+    // rendered an empty alert box and looked like a bug in the SSO round-trip.
+    if (code === "password_change_required")
+      return "This account is still on a temporary password. Sign in with your email and password to set a new one.";
     return null;
   });
   const returnTo = useMemo(() => {
@@ -109,6 +115,15 @@ export function LoginScreen() {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />
+
+              <div className="flex justify-end">
+                <Link
+                  href="/login/forgot"
+                  className="text-[0.75rem] text-ink-muted underline underline-offset-2 transition-colors hover:text-ink"
+                >
+                  Forgot password?
+                </Link>
+              </div>
 
               {error ? (
                 <div role="alert" className="flex items-start gap-2.5 rounded-neo bg-failed-bg p-3">

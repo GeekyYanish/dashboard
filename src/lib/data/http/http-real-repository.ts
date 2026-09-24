@@ -427,11 +427,14 @@ export class HttpStaff implements StaffRepo {
     }
     return (await this.list()).find((value) => value.id === id)!;
   }
+  async resetPassword(id: string, temporaryPassword: string) {
+    await api.post(`/api/v1/admin/staff/${id}/password`, { temporaryPassword });
+  }
   async create(input: { name: string; email: string; phone: string; temporaryPassword: string; role: StaffRoleId; eventId: string | null }) {
     const role = backendStaffRole(input.role);
     const eventId = input.role === "head" ? null : input.eventId;
     if (input.role !== "head" && !eventId) throw new DataError("VALIDATION_FAILED", "Select an event for an organizer or scanner.");
-    const created = await api.post<{ id: string }>("/api/v1/admin/staff", { name: input.name, email: input.email, phone: input.phone, temporaryPassword: input.temporaryPassword, assignments: [{ role, eventId }] });
+    const created = await api.post<{ id: string; promoted?: boolean }>("/api/v1/admin/staff", { name: input.name, email: input.email, phone: input.phone, temporaryPassword: input.temporaryPassword, assignments: [{ role, eventId }] });
     /* Built from the response rather than re-reading the list. The account
        already exists by this point, so letting a failed follow-up read reject
        this call reported "could not create staff account" for an account that
@@ -452,7 +455,11 @@ export class HttpStaff implements StaffRepo {
       lastLoginAt: null,
       failedAttempts: 0,
       lockedUntil: null,
-    } as StaffMember;
+      // Whether the backend made a row or promoted one someone had already
+      // signed up with. The temporary password applies either way, but only one
+      // of them is news to the administrator.
+      promoted: Boolean(created.promoted),
+    } as StaffMember & { promoted: boolean };
   }
   async grantAssignment(id: string, role: StaffRoleId, eventId: string | null) {
     const backendRole = backendStaffRole(role);

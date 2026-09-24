@@ -2742,6 +2742,33 @@ export class MockRepository implements Repository {
       return clone(rec);
     },
 
+    /**
+     * The Registration Head setting someone else's temporary password.
+     *
+     * Mirrors what the backend does on the live path: the member is forced to
+     * rotate it on next sign-in, and their lockout counters are cleared — a
+     * reset that left an account locked would hand over a password that cannot
+     * be used until the lockout drains.
+     */
+    resetPassword: async (id: string, temporaryPassword: string) => {
+      const actor = this.assertCan("staff.manageRoles");
+      const rec = this.d.staff.find((s) => s.id === id);
+      if (!rec) throw new DataError("NOT_FOUND", "Staff member not found");
+      if (rec.id === actor.id)
+        throw new DataError("FORBIDDEN", "Change your own password from the console instead.");
+      const policy = checkPassword(temporaryPassword);
+      if (!policy.ok) throw new DataError("PASSWORD_TOO_WEAK", policy.problems[0]);
+
+      const { hash, salt } = await hashPassword(temporaryPassword);
+      rec.passwordHash = hash;
+      rec.passwordSalt = salt;
+      rec.mustChangePassword = true;
+      rec.failedAttempts = 0;
+      rec.lockedUntil = null;
+      this.save("staff", rec);
+      this.log("staff.password_reset", "staff", id, null, {});
+    },
+
     workload: async () =>
       this.d.staff.map((s) => ({
         staffId: s.id,

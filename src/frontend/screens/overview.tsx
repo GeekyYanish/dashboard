@@ -17,6 +17,7 @@ import {
   FileWarning,
   ShieldAlert,
   CircleAlert,
+  BadgeCheck,
 } from "lucide-react";
 import { Page, PageHeader, StatGrid } from "@/frontend/components/page";
 import {
@@ -130,7 +131,14 @@ export function OverviewScreen() {
         />
       </StatGrid>
 
-      <StatGrid cols={4}>
+      <StatGrid cols={5}>
+        <NeoStatTile
+          label="Paid participants"
+          value={s.paidParticipants.toLocaleString("en-IN")}
+          icon={<BadgeCheck />}
+          deltaLabel="Unique payers — one pass, every event"
+          onClick={() => router.push("/payments")}
+        />
         <NeoStatTile
           label="Participants"
           value={s.participants.toLocaleString("en-IN")}

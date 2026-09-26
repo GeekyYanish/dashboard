@@ -255,26 +255,60 @@ export function RegistrationsScreen() {
     [rows, all],
   );
 
-  const exportCsv = () => {
+  const exportCsv = async () => {
     const data = rows.data ?? [];
+    // Team names are not part of the shared lookups. Best effort: if the team
+    // list cannot be read for this role, the export falls back to the team id.
+    const teamName = new Map<string, string>();
+    try {
+      for (const t of await getRepo().teams.list()) teamName.set(t.id, t.name);
+    } catch {
+      /* fall back to the id below */
+    }
     downloadCsv(`registrations-${new Date().toISOString().slice(0, 10)}.csv`, [
-      ["Reg ID", "Participant", "Participant code", "College", "Event", "Track", "Status", "Payment", "Fee", "Registered", "Source"],
+      [
+        // Registration
+        "Reg ID", "Event", "Track", "Team", "Status", "Payment", "Fee", "Source",
+        "Registered", "Confirmed", "Cancelled", "Cancel reason", "Waitlist position",
+        "Payment override reason", "Notes",
+        // Participant — the same columns as the participants export
+        "Participant code", "Name", "Email", "Phone", "Gender", "DOB", "College", "Department",
+        "Year", "Category", "T-shirt", "Diet", "Emergency",
+      ],
       ...data.map((r) => {
         const p = lookups.participant(r.participantId);
         const c = lookups.collegeOf(r.participantId);
         const e = lookups.event(r.eventId);
+        const pay = payByReg.get(r.id) ?? "unpaid";
         return [
           r.code,
-          p?.fullName ?? "",
-          p?.code ?? "",
-          c?.name ?? "",
-          e?.title ?? "",
+          e?.title ?? r.eventTitle ?? "",
           e?.track ?? "",
-          r.status,
-          payByReg.get(r.id) ?? "unpaid",
+          r.teamId ? (teamName.get(r.teamId) ?? r.teamId) : "",
+          REGISTRATION_LABEL[r.status] ?? r.status,
+          pay === "verified" ? "Paid" : titleCase(pay),
           r.feeInr,
+          titleCase(r.source),
           r.registeredAt,
-          r.source,
+          r.confirmedAt ?? "",
+          r.cancelledAt ?? "",
+          r.cancelReason ?? "",
+          r.waitlistPosition ?? "",
+          r.overrideReason ?? "",
+          r.notes ?? "",
+          p?.code ?? r.participantCode ?? "",
+          p?.fullName ?? r.participantName ?? "",
+          p?.email ?? r.participantEmail ?? "",
+          p?.phone ?? "",
+          p?.gender ?? "",
+          p?.dateOfBirth ?? "",
+          c?.name ?? "",
+          p?.department ?? "",
+          p?.yearOfStudy ?? "",
+          p?.category ?? "",
+          p?.tshirtSize ?? "",
+          p?.dietaryPref ?? "",
+          p ? `${p.emergencyName} ${p.emergencyPhone}` : "",
         ];
       }),
     ]);

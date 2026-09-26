@@ -20,7 +20,9 @@ export const REGISTRATION_TONE: Record<string, Tone> = {
 export const REGISTRATION_LABEL: Record<string, string> = {
   draft: "Draft",
   pending: "Pending",
-  confirmed: "Confirmed",
+  // A verified payment is the only approval a registration needs, so a paid
+  // registration reads "Registered". The stored value stays "confirmed".
+  confirmed: "Registered",
   waitlisted: "Waitlisted",
   cancelled: "Cancelled",
   rejected: "Rejected",

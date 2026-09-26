@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 
 import { useMemo, useState } from "react";
-import { Download, ShieldAlert, Wallet, TrendingUp, Clock, Receipt } from "lucide-react";
+import { Download, ShieldAlert, Wallet, TrendingUp, Clock, Receipt, BadgeCheck } from "lucide-react";
 import { Page, PageHeader, StatGrid } from "@/frontend/components/page";
 import { PaymentsNav } from "./payments-nav";
 import {
@@ -238,7 +238,13 @@ export function LedgerScreen() {
 
       <PaymentsNav />
 
-      <StatGrid cols={4}>
+      <StatGrid cols={5}>
+        <NeoStatTile
+          label="Paid participants"
+          value={s ? s.paidParticipants.toLocaleString("en-IN") : "—"}
+          icon={<BadgeCheck />}
+          deltaLabel="Unique people who have paid"
+        />
         <NeoStatTile
           label="Collected"
           value={inr(totals.collected, { compact: true })}

@@ -487,7 +487,6 @@ export class MockRepository implements Repository {
         { stage: "Docs cleared", count: docCompleteness.filter((c) => !c.missing.length).length },
         { stage: "Checked in", count: new Set(d.attendance.map((a) => a.participantId)).size },
       ];
-      void paidCount;
 
       return {
         totalRegistrations: d.registrations.length,
@@ -496,6 +495,7 @@ export class MockRepository implements Repository {
         waitlisted,
         cancelled,
         participants: d.participants.length,
+        paidParticipants: paidCount,
         collegesOnboarded: new Set(d.participants.map((p) => p.collegeId)).size,
         revenueCollected,
         revenueExpected: expected,

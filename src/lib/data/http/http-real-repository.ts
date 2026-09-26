@@ -341,7 +341,7 @@ export class HttpTeams implements TeamRepo {
 
 function emptyOverview(value: any): OverviewStats {
   const expected = (value.totalParticipants ?? 0) * (value.entryPassAmountInr ?? 250);
-  return { totalRegistrations: value.totalRegistrations ?? 0, confirmed: value.confirmedRegistrations ?? 0, pending: value.pendingRegistrations ?? 0, waitlisted: value.waitlistedRegistrations ?? 0, cancelled: value.cancelledRegistrations ?? 0, participants: value.totalParticipants ?? 0, collegesOnboarded: 0, revenueCollected: value.verifiedRevenueInr ?? 0, revenueExpected: expected, outstandingDues: Math.max(0, expected - (value.verifiedRevenueInr ?? 0)), verificationQueueDepth: value.pendingPayments ?? 0, oldestPendingHours: 0, accommodationRequested: 0, accommodationAllotted: 0, accommodationCapacity: 0, checkedInToday: 0, docsPending: 0, openTickets: 0, funnel: [{ stage: "Participants", count: value.totalParticipants ?? 0 }, { stage: "Registrations", count: value.totalRegistrations ?? 0 }, { stage: "Confirmed", count: value.confirmedRegistrations ?? 0 }], series: [], revenueByMethod: [], registrationsByTrack: [], topColleges: [] };
+  return { totalRegistrations: value.totalRegistrations ?? 0, confirmed: value.confirmedRegistrations ?? 0, pending: value.pendingRegistrations ?? 0, waitlisted: value.waitlistedRegistrations ?? 0, cancelled: value.cancelledRegistrations ?? 0, participants: value.totalParticipants ?? 0, paidParticipants: value.paidParticipants ?? 0, collegesOnboarded: 0, revenueCollected: value.verifiedRevenueInr ?? 0, revenueExpected: expected, outstandingDues: Math.max(0, expected - (value.verifiedRevenueInr ?? 0)), verificationQueueDepth: value.pendingPayments ?? 0, oldestPendingHours: 0, accommodationRequested: 0, accommodationAllotted: 0, accommodationCapacity: 0, checkedInToday: 0, docsPending: 0, openTickets: 0, funnel: [{ stage: "Participants", count: value.totalParticipants ?? 0 }, { stage: "Registrations", count: value.totalRegistrations ?? 0 }, { stage: "Confirmed", count: value.confirmedRegistrations ?? 0 }], series: [], revenueByMethod: [], registrationsByTrack: [], topColleges: [] };
 }
 
 /**
@@ -488,7 +488,17 @@ export class HttpStaff implements StaffRepo {
     await api.delete(`/api/v1/admin/staff/${id}/assignments/${assignmentId}`);
     return (await this.list()).find((value) => value.id === id)!;
   }
-  async workload() { return []; }
+  async workload() {
+    /* Only verifications exist server-side. Check-ins and tickets have no
+       backend record yet, so they stay 0 rather than being invented. */
+    try {
+      const rows = await api.get<{ staffId: string; verifications: number }[]>("/api/v1/admin/staff/workload");
+      return rows.map((row) => ({ staffId: row.staffId, verifications: row.verifications, walkIns: 0, tickets: 0 }));
+    } catch (error) {
+      if (isDataError(error) && ["FORBIDDEN", "NOT_AUTHENTICATED"].includes(error.code)) return [];
+      throw error;
+    }
+  }
 }
 
 export class HttpAdmin implements AdminRepo {

@@ -581,8 +581,8 @@ export interface OverviewStats {
   waitlisted: number;
   cancelled: number;
   participants: number;
-  /** Unique people with a verified payment. One pass covers every event, so this is not the registration count. */
-  paidParticipants: number;
+  /** Unique people with a verified payment. One pass covers every event, so this is not the registration count. Null when it cannot be worked out — shown as a dash, never as a fake zero. */
+  paidParticipants: number | null;
   collegesOnboarded: number;
   revenueCollected: number;
   revenueExpected: number;

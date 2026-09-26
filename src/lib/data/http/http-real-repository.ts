@@ -341,7 +341,7 @@ export class HttpTeams implements TeamRepo {
 
 function emptyOverview(value: any): OverviewStats {
   const expected = (value.totalParticipants ?? 0) * (value.entryPassAmountInr ?? 250);
-  return { totalRegistrations: value.totalRegistrations ?? 0, confirmed: value.confirmedRegistrations ?? 0, pending: value.pendingRegistrations ?? 0, waitlisted: value.waitlistedRegistrations ?? 0, cancelled: value.cancelledRegistrations ?? 0, participants: value.totalParticipants ?? 0, paidParticipants: value.paidParticipants ?? 0, collegesOnboarded: 0, revenueCollected: value.verifiedRevenueInr ?? 0, revenueExpected: expected, outstandingDues: Math.max(0, expected - (value.verifiedRevenueInr ?? 0)), verificationQueueDepth: value.pendingPayments ?? 0, oldestPendingHours: 0, accommodationRequested: 0, accommodationAllotted: 0, accommodationCapacity: 0, checkedInToday: 0, docsPending: 0, openTickets: 0, funnel: [{ stage: "Participants", count: value.totalParticipants ?? 0 }, { stage: "Registrations", count: value.totalRegistrations ?? 0 }, { stage: "Confirmed", count: value.confirmedRegistrations ?? 0 }], series: [], revenueByMethod: [], registrationsByTrack: [], topColleges: [] };
+  return { totalRegistrations: value.totalRegistrations ?? 0, confirmed: value.confirmedRegistrations ?? 0, pending: value.pendingRegistrations ?? 0, waitlisted: value.waitlistedRegistrations ?? 0, cancelled: value.cancelledRegistrations ?? 0, participants: value.totalParticipants ?? 0, paidParticipants: value.paidParticipants ?? null, collegesOnboarded: 0, revenueCollected: value.verifiedRevenueInr ?? 0, revenueExpected: expected, outstandingDues: Math.max(0, expected - (value.verifiedRevenueInr ?? 0)), verificationQueueDepth: value.pendingPayments ?? 0, oldestPendingHours: 0, accommodationRequested: 0, accommodationAllotted: 0, accommodationCapacity: 0, checkedInToday: 0, docsPending: 0, openTickets: 0, funnel: [{ stage: "Participants", count: value.totalParticipants ?? 0 }, { stage: "Registrations", count: value.totalRegistrations ?? 0 }, { stage: "Confirmed", count: value.confirmedRegistrations ?? 0 }], series: [], revenueByMethod: [], registrationsByTrack: [], topColleges: [] };
 }
 
 /**
@@ -387,8 +387,30 @@ export class HttpAudit implements AuditRepo {
 }
 
 export class HttpOverview implements OverviewRepo {
-  async stats() { return emptyOverview(await api.get<any>("/api/v1/admin/overview", scopeQuery())); }
-  async attention(): Promise<AttentionItem[]> { const stats = await this.stats(); return stats.verificationQueueDepth ? [{ id: "pending-payments", kind: "payment_aging", severity: "warning", title: "Payments awaiting review", detail: `${stats.verificationQueueDepth} receipt(s) need ADMIN verification.`, href: "/payments/queue", count: stats.verificationQueueDepth }] : []; }
+  private async overview() { return emptyOverview(await api.get<any>("/api/v1/admin/overview", scopeQuery())); }
+  async stats() {
+    const stats = await this.overview();
+    /* Older backends do not send paidParticipants. Rather than show a zero that
+       looks real, count the distinct people on verified payments from the
+       ledger the console already reads. That list is fest-wide and ADMIN-only,
+       so it is only used when no event is selected, and a full page (which may
+       be truncated) is treated as unknown rather than under-counted. */
+    if (stats.paidParticipants == null && !selectedEventId()) stats.paidParticipants = await this.paidFromLedger();
+    return stats;
+  }
+  private async paidFromLedger(): Promise<number | null> {
+    try {
+      const limit = 1000;
+      const result = await api.get<any>("/api/v1/admin/payments", { status: "verified", limit });
+      const items: any[] = result.items ?? [];
+      if (items.length >= limit) return null;
+      return new Set(items.map((payment) => payment.participantId)).size;
+    } catch (error) {
+      if (isDataError(error) && ["FORBIDDEN", "NOT_AUTHENTICATED"].includes(error.code)) return null;
+      throw error;
+    }
+  }
+  async attention(): Promise<AttentionItem[]> { const stats = await this.overview(); return stats.verificationQueueDepth ? [{ id: "pending-payments", kind: "payment_aging", severity: "warning", title: "Payments awaiting review", detail: `${stats.verificationQueueDepth} receipt(s) need ADMIN verification.`, href: "/payments/queue", count: stats.verificationQueueDepth }] : []; }
   async activity(limit = 20): Promise<AuditEvent[]> { return new HttpAudit().list({ limit }); }
   async announcements(): Promise<Announcement[]> { return []; }
 }

@@ -134,7 +134,7 @@ export function OverviewScreen() {
       <StatGrid cols={5}>
         <NeoStatTile
           label="Paid participants"
-          value={s.paidParticipants.toLocaleString("en-IN")}
+          value={s.paidParticipants == null ? "—" : s.paidParticipants.toLocaleString("en-IN")}
           icon={<BadgeCheck />}
           deltaLabel="Unique payers — one pass, every event"
           onClick={() => router.push("/payments")}

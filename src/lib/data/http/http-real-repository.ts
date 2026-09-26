@@ -421,9 +421,25 @@ export class HttpStaff implements StaffRepo {
   async update(id: string, patch: Partial<StaffMember>) {
     if (patch.role) {
       const role = backendStaffRole(patch.role);
-      const eventId = patch.role === "head" ? null : selectedEventId();
-      if (patch.role !== "head" && !eventId) throw new DataError("VALIDATION_FAILED", "Select an event before granting an event-scoped role.");
+      const current = (await this.list()).find((value) => value.id === id)?.assignments ?? [];
+      /* An event-scoped role needs an event. Use the one selected in the scope
+         picker, else the event this person is already assigned to — so moving
+         a coordinator to Desk Volunteer does not demand a scope selection that
+         the roster gives no hint about. */
+      const eventId = patch.role === "head"
+        ? null
+        : selectedEventId() ?? current.find((assignment) => assignment.eventId)?.eventId ?? null;
+      if (patch.role !== "head" && !eventId) throw new DataError("VALIDATION_FAILED", "Pick an event in the event selector at the top, then set this role again.");
       await api.post(`/api/v1/admin/staff/${id}/assignments`, { role, eventId });
+      /* The dropdown shows one role, so choosing it has to replace the old one.
+         Grants are additive on the backend and the row displays the highest
+         role held, which is why picking Desk Volunteer for a coordinator or
+         head appeared to do nothing. The new grant lands first, so the person
+         is never left without access; assignments of the same role (other
+         events) are kept. */
+      for (const assignment of current) {
+        if (assignment.role !== patch.role) await api.delete(`/api/v1/admin/staff/${id}/assignments/${assignment.id}`);
+      }
     }
     return (await this.list()).find((value) => value.id === id)!;
   }

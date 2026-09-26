@@ -15,6 +15,25 @@ const COOKIE = "registration_console_session";
  */
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length", "content-encoding"]);
 
+/**
+ * Whether a 403 means the session itself is finished.
+ *
+ * Most 403s are a refusal of one action, not of the person: an event head
+ * opening an ADMIN-only list (payments, staff, audit), asking for an event they
+ * are not assigned to, or an administrator trying to reset their own password.
+ * Clearing the cookie on those signed the operator out of a session that was
+ * still valid — the dashboard alone touches several ADMIN-only endpoints, so an
+ * event head was ejected the moment they opened it.
+ *
+ * The session is dead only when the account is disabled, or when the session
+ * probe itself is refused (the account no longer holds any console assignment).
+ */
+async function sessionIsDead(response: Response, suffix: string): Promise<boolean> {
+  if (suffix === "/admin/auth/session") return true;
+  const body = (await response.clone().json().catch(() => null)) as { error?: { code?: string } } | null;
+  return body?.error?.code === "ACCOUNT_DISABLED";
+}
+
 async function forward(request: Request) {
   const token = (await cookies()).get(COOKIE)?.value;
   const base = process.env.REGISTRATION_API_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:4000";
@@ -41,7 +60,7 @@ async function forward(request: Request) {
   response.headers.forEach((value, key) => {
     if (key.toLowerCase() !== "set-cookie" && !HOP_BY_HOP.has(key.toLowerCase())) responseHeaders.set(key, value);
   });
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401 || (response.status === 403 && (await sessionIsDead(response, suffix)))) {
     responseHeaders.append("set-cookie", `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
   }
 

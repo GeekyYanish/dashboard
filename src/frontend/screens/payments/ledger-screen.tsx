@@ -241,7 +241,7 @@ export function LedgerScreen() {
       <StatGrid cols={5}>
         <NeoStatTile
           label="Paid participants"
-          value={s ? s.paidParticipants.toLocaleString("en-IN") : "—"}
+          value={s?.paidParticipants != null ? s.paidParticipants.toLocaleString("en-IN") : "—"}
           icon={<BadgeCheck />}
           deltaLabel="Unique people who have paid"
         />

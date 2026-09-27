@@ -178,7 +178,7 @@ export interface SubstitutionRequest {
 // Money
 // ---------------------------------------------------------------------------
 
-export type PaymentStatus = "pending" | "verified" | "rejected" | "refunded" | "partial";
+export type PaymentStatus = "pending" | "verified" | "rejected" | "cancelled" | "refunded" | "partial";
 
 export interface FeeLine {
   label: string;

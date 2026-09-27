@@ -1379,6 +1379,33 @@ export class MockRepository implements Repository {
       return clone(rec);
     },
 
+    /** Reverses an already-verified payment — Registration Head only. Not a refund: see the interface note. */
+    cancel: async (id: string, reason: string) => {
+      this.assertCan("refunds.approve");
+      const rec = this.d.payments.find((p) => p.id === id);
+      if (!rec) throw new DataError("NOT_FOUND");
+      if (rec.status !== "verified") throw new DataError("PAYMENT_NOT_VERIFIED", "Only a verified payment can be cancelled.");
+
+      const before = { status: rec.status };
+      rec.status = "cancelled" as never;
+      rec.reviewNote = reason;
+      this.save("payments", rec);
+
+      // Cancels every registration this payment had confirmed — the same set
+      // `review()` confirms on the way in.
+      for (const rid of rec.registrationIds) {
+        const r = this.d.registrations.find((x) => x.id === rid);
+        if (r && r.status === "confirmed") {
+          r.status = "cancelled";
+          r.cancelledAt = nowIso();
+          r.cancelReason = reason;
+          this.save("registrations", r);
+        }
+      }
+      this.log("payment.cancelled", "payment", id, before, { status: rec.status }, reason);
+      return clone(rec);
+    },
+
     bulkReview: async (ids: string[], decision: "verified" | "rejected", note?: string) => {
       let n = 0;
       for (const id of ids) {

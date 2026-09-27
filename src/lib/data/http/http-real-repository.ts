@@ -249,8 +249,33 @@ export class HttpPayments implements PaymentRepo {
     return config.tiers ?? [];
   }
   async list(filter: any = {}) {
-    const result = await api.get<any>("/api/v1/admin/payments", { status: filter.status?.[0], participantId: filter.participantId, limit: 200 });
-    return (result.items ?? []).map(toPayment).filter((payment: Payment) => !filter.method || (payment.method != null && filter.method.includes(payment.method)));
+    /* `search` and `flaggedOnly` have no backend equivalent — the admin payments
+       endpoint only understands status, participantId and limit — so both are
+       applied here against the raw rows, before `toPayment` drops the
+       participant fields the search box promises ("Name, UTR, invoice serial or
+       participant code"). Client-side filtering only sees what was fetched, so
+       the page is widened to the backend's own cap while a text or fraud filter
+       is active, trading one bigger request for not silently missing an older
+       match that a 200-row page would have pushed off the end.
+       `status` used to send only the first selected value — the backend accepts
+       a comma-separated list, so picking more than one status quietly dropped
+       every status after the first. */
+    const hasClientFilter = Boolean(filter.search) || Boolean(filter.flaggedOnly);
+    const result = await api.get<any>("/api/v1/admin/payments", {
+      status: filter.status?.join(","),
+      participantId: filter.participantId,
+      limit: hasClientFilter ? 1000 : 200,
+    });
+    let rows: any[] = result.items ?? [];
+    if (filter.flaggedOnly) rows = rows.filter((row) => (row.fraudFlags ?? []).length > 0);
+    const q = typeof filter.search === "string" ? filter.search.trim().toLowerCase() : "";
+    if (q) {
+      rows = rows.filter((row) =>
+        [row.participantName, row.participantEmail, row.participantCode, row.utr, row.invoiceSerial]
+          .some((field) => typeof field === "string" && field.toLowerCase().includes(q)),
+      );
+    }
+    return rows.map(toPayment).filter((payment: Payment) => !filter.method || (payment.method != null && filter.method.includes(payment.method)));
   }
   async get(id: string) { try { const value = await api.get<any>(`/api/v1/admin/payments/${id}`); return value ? toPayment(value) : null; } catch (error) { if (isDataError(error) && error.code === "NOT_FOUND") return null; throw error; } }
   async forParticipant(participantId: string) {
@@ -303,6 +328,7 @@ export class HttpPayments implements PaymentRepo {
     return toPayment(await api.post<any>(`/api/v1/admin/payments/${id}/review`, { decision, reason: note }));
   }
   async bulkReview(ids: string[], decision: "verified" | "rejected", note?: string) { const result = await api.post<{ updated: number }>("/api/v1/admin/payments/bulk-review", { ids, decision, reason: note }); return result.updated; }
+  async cancel(id: string, reason: string) { return toPayment(await api.post<any>(`/api/v1/admin/payments/${id}/cancel`, { reason })); }
   async runFraudSweep() { return this.list(); }
   async outstanding() { return []; }
   async quote() { return []; }

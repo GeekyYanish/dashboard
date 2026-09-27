@@ -263,6 +263,15 @@ export interface PaymentRepo {
     note?: string,
   ): Promise<Payment>;
   bulkReview(ids: string[], decision: "verified" | "rejected", note?: string): Promise<number>;
+  /**
+   * Reverses an already-verified payment — Registration Head only.
+   *
+   * Cancels every registration that payment had confirmed. This is not a
+   * refund: it records that the payment is void and undoes what it confirmed,
+   * not that money has actually moved. Throws NOT_VERIFIED for anything other
+   * than a verified payment.
+   */
+  cancel(id: string, reason: string): Promise<Payment>;
   /** Recomputes fraud flags across the ledger. */
   runFraudSweep(): Promise<Payment[]>;
   outstanding(): Promise<

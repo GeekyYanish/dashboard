@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, X, Undo2, ShieldAlert } from "lucide-react";
+import { GatedButton } from "@/frontend/components/gated";
 import {
   NeoDrawer,
   NeoButton,
@@ -11,24 +12,15 @@ import {
   NeoSkeleton,
   NeoModal,
   NeoInput,
-  NeoSelect,
   toast,
 } from "@/frontend/components/neo";
 import { useAsync } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
-import { isDataError, type Refund } from "@/lib/data/types";
+import { isDataError } from "@/lib/data/types";
 import { PAYMENT_METHODS, inr } from "@/lib/fest.config";
 import { PAYMENT_LABEL, PAYMENT_TONE, titleCase } from "@/frontend/status";
 import { relativeTime } from "@/lib/utils";
-
-const REFUND_REASONS: { value: Refund["reasonCode"]; label: string }[] = [
-  { value: "event_cancelled", label: "Event cancelled" },
-  { value: "withdrawal", label: "Participant withdrew" },
-  { value: "duplicate_payment", label: "Duplicate payment" },
-  { value: "overcharge", label: "Overcharged" },
-  { value: "other", label: "Other" },
-];
 
 export function PaymentDrawer({
   paymentId,
@@ -41,9 +33,8 @@ export function PaymentDrawer({
 }) {
   const lookups = useLookups();
   const [busy, setBusy] = useState(false);
-  const [refundOpen, setRefundOpen] = useState(false);
-  const [refundAmount, setRefundAmount] = useState("");
-  const [refundReason, setRefundReason] = useState<Refund["reasonCode"]>("withdrawal");
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
 
   const pay = useAsync(
     () => (paymentId ? getRepo().payments.get(paymentId) : Promise.resolve(null)),
@@ -69,10 +60,6 @@ export function PaymentDrawer({
     }
   };
 
-  const refundable = p
-    ? p.amount - mine.filter((r) => r.status !== "rejected").reduce((s, r) => s + r.amount, 0)
-    : 0;
-
   return (
     <>
       <NeoDrawer
@@ -84,18 +71,18 @@ export function PaymentDrawer({
           p ? (
             <>
               {p.status === "verified" ? (
-                <NeoButton
+                <GatedButton
+                  capability="refunds.approve"
                   size="sm"
-                  variant="secondary"
+                  variant="danger"
                   icon={<Undo2 />}
-                  disabled={refundable <= 0}
                   onClick={() => {
-                    setRefundAmount(String(refundable));
-                    setRefundOpen(true);
+                    setCancelReason("");
+                    setCancelOpen(true);
                   }}
                 >
-                  Refund
-                </NeoButton>
+                  Cancel payment
+                </GatedButton>
               ) : null}
               {p.status === "pending" ? (
                 <>
@@ -246,54 +233,36 @@ export function PaymentDrawer({
       </NeoDrawer>
 
       <NeoModal
-        open={refundOpen}
-        onOpenChange={setRefundOpen}
-        title="Request a refund"
-        description={`Up to ${inr(refundable)} is still refundable on this payment. Requests need the Registration Head's approval before payout.`}
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        title="Cancel this payment"
+        description="Marks the payment void and cancels every registration it confirmed. This does not send money back on its own — arrange the payout separately if one is owed, and it cannot be undone from here."
         footer={
           <>
-            <NeoButton variant="ghost" onClick={() => setRefundOpen(false)}>
-              Cancel
+            <NeoButton variant="ghost" onClick={() => setCancelOpen(false)}>
+              Back
             </NeoButton>
             <NeoButton
-              variant="primary"
+              variant="danger"
               loading={busy}
+              disabled={cancelReason.trim().length < 3}
               onClick={async () => {
                 if (!p) return;
-                setRefundOpen(false);
-                await act(
-                  () =>
-                    getRepo().refunds.request({
-                      paymentId: p.id,
-                      amount: Number(refundAmount),
-                      reasonCode: refundReason,
-                    }),
-                  "Refund requested",
-                );
+                setCancelOpen(false);
+                await act(() => getRepo().payments.cancel(p.id, cancelReason.trim()), "Payment cancelled");
               }}
             >
-              Request refund
+              Cancel payment
             </NeoButton>
           </>
         }
       >
-        <div className="space-y-3">
-          <NeoInput
-            label="Amount"
-            type="number"
-            mono
-            value={refundAmount}
-            onChange={(e) => setRefundAmount(e.target.value)}
-            suffix="INR"
-            hint={`Cannot exceed ${inr(refundable)}`}
-          />
-          <NeoSelect
-            label="Reason"
-            value={refundReason}
-            onChange={(e) => setRefundReason(e.target.value as Refund["reasonCode"])}
-            options={REFUND_REASONS}
-          />
-        </div>
+        <NeoInput
+          label="Reason"
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.target.value)}
+          hint="Required — shown on the payment's audit trail."
+        />
       </NeoModal>
     </>
   );

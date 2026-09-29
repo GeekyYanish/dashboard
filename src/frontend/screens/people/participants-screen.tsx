@@ -383,12 +383,25 @@ function ParticipantDrawer({
                         if (next === p.category) return;
                         setSavingCategory(true);
                         try {
-                          await getRepo().participants.update(p.id, { category: next });
-                          toast.success(
-                            "Category updated",
-                            `${p.fullName} is now a ${CATEGORIES.find((c) => c.id === next)?.label}.`,
-                          );
+                          const updated = await getRepo().participants.update(p.id, { category: next });
+                          // `p` comes from this drawer's own useLookups() cache, which
+                          // the list-level onChanged() below never touches — without
+                          // this the select silently snaps back to the old value.
+                          lookups.reload();
                           onChanged();
+                          if (updated.category === next) {
+                            toast.success(
+                              "Category updated",
+                              `${p.fullName} is now a ${CATEGORIES.find((c) => c.id === updated.category)?.label}.`,
+                            );
+                          } else {
+                            // The request didn't throw, but the server didn't apply it
+                            // either — trust what it actually persisted, not the click.
+                            toast.error(
+                              "Category not changed",
+                              "The server did not apply this change — check permissions and try again.",
+                            );
+                          }
                         } catch (err) {
                           toast.error(isDataError(err) ? err.message : "Could not change category");
                         } finally {

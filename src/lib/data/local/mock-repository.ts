@@ -18,6 +18,7 @@
 
 import {
   CATEGORIES,
+  categoryCountsTowardRevenue,
   DOC_TYPES,
   FEES,
   FEST,
@@ -263,6 +264,16 @@ export class MockRepository implements Repository {
   // Derived helpers used across modules
   // =========================================================================
 
+  /**
+   * Whether a participant's money counts toward fest revenue. Volunteers,
+   * delegates and faculty escorts are checking or supporting the flow, not
+   * paying for it — only the "participant" category is real revenue.
+   */
+  private countsTowardRevenue(participantId: string): boolean {
+    const p = this.indexes().participantsById.get(participantId);
+    return p ? categoryCountsTowardRevenue(p.category) : true;
+  }
+
   /** Net verified money for a participant, minus refunds already paid out. */
   private netPaid(participantId: string): number {
     const ix = this.indexes();
@@ -411,12 +422,16 @@ export class MockRepository implements Repository {
       const cancelled = d.registrations.filter((r) => r.status === "cancelled").length;
 
       const verified = d.payments.filter((p) => p.status === "verified");
-      const revenueCollected = verified.reduce((s, p) => s + p.amount, 0);
+      // Volunteers, delegates and faculty escorts are checking or supporting
+      // the flow, not paying for it — every revenue figure below counts only
+      // the "participant" category's registrations and payments.
+      const revenueVerified = verified.filter((p) => this.countsTowardRevenue(p.participantId));
+      const revenueCollected = revenueVerified.reduce((s, p) => s + p.amount, 0);
       const queue = d.payments.filter((p) => p.status === "pending");
 
       const participantIds = new Set(live.map((r) => r.participantId));
       let expected = 0;
-      for (const id of participantIds) expected += this.grossDue(id);
+      for (const id of participantIds) if (this.countsTowardRevenue(id)) expected += this.grossDue(id);
 
       const outstanding = Math.max(0, expected - revenueCollected);
 
@@ -430,7 +445,7 @@ export class MockRepository implements Repository {
         const day = new Date(now().getTime() - i * 86400000);
         const key = day.toISOString().slice(0, 10);
         const regs = d.registrations.filter((r) => r.registeredAt.slice(0, 10) === key);
-        const pays = verified.filter((p) => p.submittedAt.slice(0, 10) === key);
+        const pays = revenueVerified.filter((p) => p.submittedAt.slice(0, 10) === key);
         series.push({
           date: key,
           registrations: regs.length,
@@ -440,7 +455,7 @@ export class MockRepository implements Repository {
       }
 
       const revenueByMethod = ["upi", "neft", "gateway", "cash"].map((m) => {
-        const rows = verified.filter((p) => p.method === m);
+        const rows = revenueVerified.filter((p) => p.method === m);
         return { method: m, amount: rows.reduce((s, p) => s + p.amount, 0), count: rows.length };
       });
 
@@ -453,8 +468,10 @@ export class MockRepository implements Repository {
       for (const p of d.participants) {
         const cur = collegeAgg.get(p.collegeId) ?? { count: 0, paid: 0, due: 0 };
         cur.count++;
-        cur.paid += this.netPaid(p.id);
-        cur.due += Math.max(0, this.grossDue(p.id) - this.netPaid(p.id));
+        if (this.countsTowardRevenue(p.id)) {
+          cur.paid += this.netPaid(p.id);
+          cur.due += Math.max(0, this.grossDue(p.id) - this.netPaid(p.id));
+        }
         collegeAgg.set(p.collegeId, cur);
       }
       const topColleges = [...collegeAgg.entries()]
@@ -478,7 +495,7 @@ export class MockRepository implements Repository {
 
       // Funnel — where people fall out between intent and turning up.
       const submitted = d.registrations.length;
-      const paidCount = new Set(verified.map((p) => p.participantId)).size;
+      const paidCount = new Set(revenueVerified.map((p) => p.participantId)).size;
       const funnel = [
         { stage: "Registered", count: submitted },
         { stage: "Payment submitted", count: d.payments.length },
@@ -711,6 +728,12 @@ export class MockRepository implements Repository {
     update: async (id: string, patch: Partial<Participant>) => {
       const rec = this.d.participants.find((p) => p.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
+      // Recategorising someone changes what counts toward revenue, so it needs
+      // its own admin-only capability rather than riding along with the
+      // general-purpose profile-correction patch.
+      if (patch.category !== undefined && patch.category !== rec.category) {
+        this.assertCan("participants.recategorize");
+      }
       const before: Record<string, unknown> = {};
       for (const k of Object.keys(patch)) before[k] = (rec as unknown as Record<string, unknown>)[k];
       Object.assign(rec, patch);

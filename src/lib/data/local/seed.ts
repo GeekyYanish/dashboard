@@ -185,7 +185,7 @@ const PEOPLE: PersonSpec[] = [
     category: "participant", tshirt: "S", diet: "jain", events: ["Poster Design", "Photography Walk"], money: "paid" },
 
   { name: "Sameer Kulkarni", gender: "male", age: 20, college: "KLETU", dept: "Mechanical", year: 3,
-    category: "accompanist", tshirt: "L", diet: "non_veg", events: [], money: "paid",
+    category: "delegate", tshirt: "L", diet: "non_veg", events: [], money: "paid",
     nights: [D1, D2], travel: { mode: "train", station: "Yesvantpur Junction", pickup: true } },
 
   { name: "Ishita Bose", gender: "female", age: 19, college: "NITC", dept: "Biotechnology", year: 2,

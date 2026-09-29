@@ -24,7 +24,7 @@ import { useAsync, useDebounced } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
 import type { Payment } from "@/lib/data/types";
-import { PAYMENT_METHODS, inr } from "@/lib/fest.config";
+import { categoryCountsTowardRevenue, PAYMENT_METHODS, inr } from "@/lib/fest.config";
 import { PAYMENT_LABEL, PAYMENT_TONE, slaLabel, slaTone } from "@/frontend/status";
 import { downloadCsv, hoursSince, relativeTime } from "@/lib/utils";
 
@@ -53,8 +53,13 @@ export function LedgerScreen() {
 
   const totals = useMemo(() => {
     const data = all.data ?? [];
-    const verified = data.filter((p) => p.status === "verified");
-    const pending = data.filter((p) => p.status === "pending");
+    // Volunteers, delegates and faculty escorts are checking or supporting the
+    // flow, not paying for it — their payments are excluded from every money
+    // total here, same as the overview stats.
+    const countsTowardRevenue = (p: Payment) =>
+      categoryCountsTowardRevenue(lookups.participant(p.participantId)?.category ?? "participant");
+    const verified = data.filter((p) => p.status === "verified" && countsTowardRevenue(p));
+    const pending = data.filter((p) => p.status === "pending" && countsTowardRevenue(p));
     return {
       collected: verified.reduce((s, p) => s + p.amount, 0),
       pendingValue: pending.reduce((s, p) => s + p.amount, 0),
@@ -62,7 +67,7 @@ export function LedgerScreen() {
       flagged: data.filter((p) => p.fraudFlags.length > 0).length,
       avgTicket: verified.length ? verified.reduce((s, p) => s + p.amount, 0) / verified.length : 0,
     };
-  }, [all.data]);
+  }, [all.data, lookups]);
 
   const facets: Facet[] = [
     {

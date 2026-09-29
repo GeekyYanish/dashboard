@@ -17,6 +17,8 @@ import {
   NeoTabs,
   NeoSkeleton,
   NeoModal,
+  NeoSelect,
+  NeoTooltip,
   toast,
   type Column,
   type SortState,
@@ -26,7 +28,7 @@ import { useAsync, useDebounced } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
 import { isDataError, type Participant } from "@/lib/data/types";
-import { CATEGORIES, DOC_TYPES, inr } from "@/lib/fest.config";
+import { CATEGORIES, DOC_TYPES, inr, type CategoryId } from "@/lib/fest.config";
 import {
   ACCOMMODATION_TONE,
   DOC_TONE,
@@ -37,7 +39,7 @@ import {
   titleCase,
 } from "@/frontend/status";
 import { downloadCsv, relativeTime } from "@/lib/utils";
-import { useAuth } from "@/frontend/hooks/use-auth";
+import { useAuth, useCan } from "@/frontend/hooks/use-auth";
 
 export function ParticipantsScreen() {
   const params = useSearchParams();
@@ -179,7 +181,7 @@ export function ParticipantsScreen() {
     <Page>
       <PageHeader
         title="Participants"
-        description="Everyone attending, in every category — competitors, delegates, accompanists, faculty escorts, volunteers and guests."
+        description="Everyone attending, in every category — competitors, delegates, faculty escorts and volunteers."
         actions={
           <NeoButton
             size="sm"
@@ -262,9 +264,11 @@ function ParticipantDrawer({
   const lookups = useLookups();
   const { role } = useAuth();
   const canExportPersonalData = role === "head";
+  const { allowed: canRecategorize, reason: recategorizeReason } = useCan("participants.recategorize");
   const [tab, setTab] = useState<Tab>("profile");
   const [eraseOpen, setEraseOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [savingCategory, setSavingCategory] = useState(false);
 
   const p = participantId ? lookups.participant(participantId) : undefined;
   const flags = useAsync(
@@ -367,9 +371,38 @@ function ParticipantDrawer({
                   <span className="font-display text-[1rem] font-semibold text-ink">
                     {p.fullName}
                   </span>
-                  <StatusBadge tone="info" size="sm" dot={false}>
-                    {CATEGORIES.find((c) => c.id === p.category)?.label}
-                  </StatusBadge>
+                  {canRecategorize ? (
+                    <NeoSelect
+                      aria-label="Category"
+                      value={p.category}
+                      disabled={savingCategory}
+                      className="w-auto"
+                      options={CATEGORIES.map((c) => ({ value: c.id, label: c.label }))}
+                      onChange={async (e) => {
+                        const next = e.target.value as CategoryId;
+                        if (next === p.category) return;
+                        setSavingCategory(true);
+                        try {
+                          await getRepo().participants.update(p.id, { category: next });
+                          toast.success(
+                            "Category updated",
+                            `${p.fullName} is now a ${CATEGORIES.find((c) => c.id === next)?.label}.`,
+                          );
+                          onChanged();
+                        } catch (err) {
+                          toast.error(isDataError(err) ? err.message : "Could not change category");
+                        } finally {
+                          setSavingCategory(false);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <NeoTooltip content={recategorizeReason ?? "Not permitted for your role"}>
+                      <StatusBadge tone="info" size="sm" dot={false}>
+                        {CATEGORIES.find((c) => c.id === p.category)?.label}
+                      </StatusBadge>
+                    </NeoTooltip>
+                  )}
                   {flags.data?.isMinor ? (
                     <StatusBadge tone="pending" size="sm" dot={false}>
                       Under 18

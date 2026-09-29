@@ -102,6 +102,8 @@ export const CATEGORIES = [
     baseFee: 350,
     badge: "#2c7f52",
     requiredDocs: ["college_id", "bonafide"],
+    /** Only this category's registrations and payments count toward revenue. */
+    countsTowardRevenue: true,
   },
   {
     id: "delegate",
@@ -111,42 +113,27 @@ export const CATEGORIES = [
     baseFee: 250,
     badge: "#3a6595",
     requiredDocs: ["college_id"],
-  },
-  {
-    id: "accompanist",
-    label: "Accompanist",
-    short: "ACMP",
-    blurb: "Supports a performing team (music, tech, lights)",
-    baseFee: 150,
-    badge: "#a97614",
-    requiredDocs: ["college_id"],
+    countsTowardRevenue: false,
   },
   {
     id: "faculty",
-    label: "Faculty Escort",
+    label: "Faculty",
     short: "FCLT",
     blurb: "Mandatory for contingents with under-18 members",
     baseFee: 0,
     badge: "#6f6f66",
     requiredDocs: ["institution_letter"],
+    countsTowardRevenue: false,
   },
   {
     id: "volunteer",
     label: "Volunteer",
     short: "VOLR",
-    blurb: "Host-campus organising crew",
+    blurb: "Host-campus organising crew — testing the flow, not paying for it",
     baseFee: 0,
     badge: "#2f7d80",
     requiredDocs: [],
-  },
-  {
-    id: "guest",
-    label: "Guest / Judge",
-    short: "GUST",
-    blurb: "Invited judge, speaker or artist",
-    baseFee: 0,
-    badge: "#cf4d1c",
-    requiredDocs: [],
+    countsTowardRevenue: false,
   },
 ] as const;
 
@@ -308,6 +295,8 @@ export function inr(amount: number, opts?: { compact?: boolean }): string {
 }
 
 export const categoryById = (id: string) => CATEGORIES.find((c) => c.id === id);
+/** True only for the "participant" category — everyone else (volunteer, delegate, faculty) is excluded from revenue totals. */
+export const categoryCountsTowardRevenue = (id: string) => categoryById(id)?.countsTowardRevenue ?? true;
 export const trackById = (id: string) => TRACKS.find((t) => t.id === id);
 export const docTypeById = (id: string) => DOC_TYPES.find((d) => d.id === id);
 export const roleById = (id: string) => STAFF_ROLES.find((r) => r.id === id);

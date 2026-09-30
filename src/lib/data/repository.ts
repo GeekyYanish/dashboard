@@ -314,12 +314,23 @@ export interface CouponRepo {
 export interface CollegeRepo {
   list(): Promise<College[]>;
   get(id: string): Promise<College | null>;
-  /** Contingent rollup — size, money, accommodation, arrival. */
-  contingents(): Promise<
+  /**
+   * Contingent rollup — size, money, accommodation, arrival.
+   *
+   * `eventId` scopes `participants`/`confirmed`/`paidPeople`/`paid`/`due` to
+   * people from that college registered for that one event; omitted, it falls
+   * back to the console's globally selected event scope (fest-wide when
+   * nothing is selected). `paidPeople` is what a college needs to actually be
+   * "confirmed" — a nonzero `paid` total can still be a single early payer in
+   * an otherwise unpaid contingent.
+   */
+  contingents(eventId?: string): Promise<
     {
       college: College;
       participants: number;
       confirmed: number;
+      /** Distinct people with a verified payment — zero means nobody here has paid yet. */
+      paidPeople: number;
       paid: number;
       due: number;
       accommodation: number;

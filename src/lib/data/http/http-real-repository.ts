@@ -345,7 +345,7 @@ export class HttpEvents implements EventRepo {
   // accessible catalogue so changing scope does not collapse its options.
   async list() { return (await api.get<any[]>("/api/v1/admin/events")).map(toEvent); }
   async get(id: string) { try { const value = await api.get<any[]>("/api/v1/admin/events", { eventId: id }); return value[0] ? toEvent(value[0]) : null; } catch (error) { throw error; } }
-  async stats(eventId: string): Promise<EventStats> { const value = await api.get<any>("/api/v1/admin/overview", { eventId }); return { eventId, confirmedCount: value.confirmedRegistrations ?? 0, pendingCount: value.pendingRegistrations ?? 0, waitlistCount: value.waitlistedRegistrations ?? 0, checkedInCount: 0, capacity: value.capacity ?? null, seatsLeft: value.capacity == null ? null : Math.max(0, value.capacity - (value.filledSeats ?? 0)), revenue: value.verifiedRevenueInr ?? 0 }; }
+  async stats(eventId: string): Promise<EventStats> { const value = await api.get<any>("/api/v1/admin/overview", { eventId }); const confirmedCount = value.confirmedRegistrations ?? 0; const pendingCount = value.pendingRegistrations ?? 0; return { eventId, confirmedCount, pendingCount, waitlistCount: value.waitlistedRegistrations ?? 0, checkedInCount: 0, capacity: value.capacity ?? null, seatsLeft: value.capacity == null ? null : Math.max(0, value.capacity - (value.filledSeats ?? 0)), filled: value.filledSeats ?? confirmedCount + pendingCount, revenue: value.verifiedRevenueInr ?? 0 }; }
   async allStats() { const events = await this.list(); return Promise.all(events.map((event) => this.stats(event.id))); }
   async update(): Promise<FestEvent> { throw new DataError("FORBIDDEN", "Event edits are not enabled in the live registration core."); }
   async venueClashes() { return []; }
@@ -573,16 +573,17 @@ export class HttpColleges implements CollegeRepo {
   async get(id: string): Promise<College | null> {
     return (await this.list()).find((college) => college.id === id) ?? null;
   }
-  async contingents() {
+  async contingents(eventId?: string) {
     return await api.get<{
       college: College;
       participants: number;
       confirmed: number;
+      paidPeople: number;
       paid: number;
       due: number;
       accommodation: number;
       arrivalAt: string | null;
-    }[]>("/api/v1/admin/colleges/contingents");
+    }[]>("/api/v1/admin/colleges/contingents", { eventId: eventId ?? selectedEventId() });
   }
   async setVerified(id: string, verified: boolean): Promise<College> {
     return await api.patch<College>(`/api/v1/admin/colleges/${id}`, { isVerified: verified });

@@ -331,7 +331,7 @@ export function DeskScreen() {
                           </span>
                         </span>
                         <span className="shrink-0 text-[0.78rem] text-ink-muted">
-                          {lookups.college(p.collegeId)?.shortName}
+                          {lookups.college(p.collegeId)?.shortName ?? p.collegeName}
                         </span>
                       </button>
                     ))
@@ -368,7 +368,7 @@ export function DeskScreen() {
                 <NeoCard.Header
                   eyebrow={selected.code}
                   title={selected.fullName}
-                  subtitle={`${lookups.college(selected.collegeId)?.name} · ${selected.department}`}
+                  subtitle={`${lookups.college(selected.collegeId)?.name ?? selected.collegeName ?? ""} · ${selected.department}`}
                   actions={
                     <StatusBadge tone="info" size="sm" dot={false}>
                       {CATEGORIES.find((c) => c.id === selected.category)?.label}
@@ -541,7 +541,7 @@ export function DeskScreen() {
       <BadgeSheet
         participant={printFor}
         onClose={() => setPrintFor(null)}
-        college={printFor ? lookups.college(printFor.collegeId)?.shortName : undefined}
+        college={printFor ? lookups.college(printFor.collegeId)?.shortName ?? printFor.collegeName ?? undefined : undefined}
       />
     </div>
   );
@@ -712,6 +712,9 @@ function DeskRegistrationModal({
 
 /* ------------------------------------------------------------------------- */
 
+/** Sentinel select value for "their college isn't in the list" — never sent to the backend. */
+const OTHER_COLLEGE = "__other__";
+
 function WalkInForm({
   onCancel,
   onCreated,
@@ -728,6 +731,7 @@ function WalkInForm({
     gender: "male",
     dateOfBirth: "2005-01-01",
     collegeId: "",
+    customCollegeName: "",
     department: "Computer Science",
     yearOfStudy: "2",
     category: "participant",
@@ -738,7 +742,11 @@ function WalkInForm({
   });
 
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const valid = form.fullName.trim().length > 2 && form.phone.replace(/\D/g, "").length >= 10 && form.collegeId;
+  const usingCustomCollege = form.collegeId === OTHER_COLLEGE;
+  const valid =
+    form.fullName.trim().length > 2 &&
+    form.phone.replace(/\D/g, "").length >= 10 &&
+    (usingCustomCollege ? form.customCollegeName.trim().length > 0 : !!form.collegeId);
 
   const submit = async () => {
     setBusy(true);
@@ -749,7 +757,8 @@ function WalkInForm({
         phone: form.phone,
         gender: form.gender as Participant["gender"],
         dateOfBirth: form.dateOfBirth,
-        collegeId: form.collegeId,
+        collegeId: usingCustomCollege ? "" : form.collegeId,
+        customCollegeName: usingCustomCollege ? form.customCollegeName.trim() : undefined,
         department: form.department,
         yearOfStudy: Number(form.yearOfStudy),
         category: form.category as Participant["category"],
@@ -812,8 +821,20 @@ function WalkInForm({
             value={form.collegeId}
             onChange={(e) => set("collegeId")(e.target.value)}
             placeholder="Choose…"
-            options={lookups.colleges.map((c) => ({ value: c.id, label: c.shortName }))}
+            options={[
+              ...lookups.colleges.map((c) => ({ value: c.id, label: c.shortName })),
+              { value: OTHER_COLLEGE, label: "Not listed — type it in" },
+            ]}
           />
+          {usingCustomCollege ? (
+            <NeoInput
+              label="College name"
+              required
+              value={form.customCollegeName}
+              onChange={(e) => set("customCollegeName")(e.target.value)}
+              placeholder="Type the institution's full name"
+            />
+          ) : null}
           <NeoSelect
             label="Category"
             value={form.category}

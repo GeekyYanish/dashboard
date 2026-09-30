@@ -91,6 +91,7 @@ function toParticipant(value: any): Participant {
     gender: value.gender ?? "other",
     dateOfBirth: value.dateOfBirth ?? "",
     collegeId: value.collegeId ?? "—",
+    collegeName: value.collegeName ?? null,
     department: value.department ?? value.departmentId ?? "—",
     yearOfStudy: Number(value.yearOfStudy ?? 0),
     category: value.category ?? "participant",
@@ -140,6 +141,9 @@ export class HttpParticipants implements ParticipantRepo {
       gender: input.gender,
       dateOfBirth: input.dateOfBirth || null,
       collegeId: input.collegeId || null,
+      // Only meaningful when collegeId is empty — the desk typed an
+      // institution that wasn't in the reference list.
+      customCollegeName: input.customCollegeName || null,
       // `department` carries a course id at the desk; the read path returns
       // the course's name in the same field.
       courseId: input.department || null,

@@ -19,6 +19,7 @@ import {
   ScrollText,
   Settings,
   Radio,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
@@ -108,6 +109,7 @@ export const NAV: NavSection[] = [
     label: "Operate",
     items: [
       { href: "/reports", label: "Reports", icon: BarChart3 },
+      { href: "/highlights", label: "Fest Highlights", icon: Sparkles },
       { href: "/team", label: "Team & roster", icon: UserCog },
       { href: "/audit", label: "Audit log", icon: ScrollText },
       { href: "/settings", label: "Settings", icon: Settings, match: ["/settings/fees", "/settings/roles", "/settings/privacy", "/settings/form"] },

@@ -87,6 +87,14 @@ export interface Participant {
   gender: Gender;
   dateOfBirth: string;
   collegeId: string;
+  /**
+   * Resolved display name for the participant's institution — the real
+   * college's name, or their own typed one when `collegeId` is empty because
+   * their college wasn't in the reference list. Read-only, set by the backend.
+   */
+  collegeName?: string | null;
+  /** Set when they typed their own institution instead of picking `collegeId`. */
+  customCollegeName?: string | null;
   department: string;
   yearOfStudy: number;
   category: CategoryId;

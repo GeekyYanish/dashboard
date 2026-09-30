@@ -1396,6 +1396,22 @@ export class MockRepository implements Repository {
             this.save("registrations", r);
           }
         }
+
+        // The first real payment from a college is treated as the paperwork
+        // check: a family/college that has actually paid is real, so the desk
+        // no longer has to separately click "Mark verified" for them. This
+        // never un-verifies — a college manually verified with zero payers
+        // still stays verified.
+        const payer = this.d.participants.find((p) => p.id === rec.participantId);
+        const college = payer ? this.d.colleges.find((c) => c.id === payer.collegeId) : undefined;
+        if (college && !college.isVerified) {
+          college.isVerified = true;
+          this.save("colleges", college);
+          this.log("college.verification_changed", "college", college.id, { isVerified: false }, {
+            isVerified: true,
+            reason: "auto-verified: first payment verified",
+          });
+        }
       }
       this.save("payments", rec);
       this.log(`payment.${decision}`, "payment", id, before, { status: rec.status, invoiceSerial: rec.invoiceSerial }, note);

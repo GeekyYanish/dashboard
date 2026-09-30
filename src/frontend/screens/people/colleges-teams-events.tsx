@@ -32,7 +32,7 @@ import {
   type Column,
 } from "@/frontend/components/neo";
 import { HeatmapGrid } from "@/frontend/components/charts";
-import { FilterBar } from "@/frontend/components/filter-bar";
+import { FilterBar, type Facet } from "@/frontend/components/filter-bar";
 import { useAsync, useDebounced } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
@@ -50,10 +50,14 @@ export function CollegesScreen() {
   const contingents = useAsync(() => getRepo().colleges.contingents(), []);
   const [search, setSearch] = useState("");
   const dSearch = useDebounced(search, 200);
+  const [facetState, setFacetState] = useState<Record<string, string[]>>({});
   const [openId, setOpenId] = useState<string | null>(null);
 
   const rows = useMemo(() => {
-    const d = contingents.data ?? [];
+    let d = contingents.data ?? [];
+    const verification = facetState.verification?.[0];
+    if (verification === "verified") d = d.filter((c) => c.college.isVerified);
+    else if (verification === "unverified") d = d.filter((c) => !c.college.isVerified);
     if (!dSearch) return d;
     const q = dSearch.toLowerCase();
     return d.filter(
@@ -62,16 +66,18 @@ export function CollegesScreen() {
         c.college.shortName.toLowerCase().includes(q) ||
         c.college.city.toLowerCase().includes(q),
     );
-  }, [contingents.data, dSearch]);
+  }, [contingents.data, dSearch, facetState]);
 
   const totals = useMemo(() => {
     const d = contingents.data ?? [];
+    const unverified = d.filter((c) => !c.college.isVerified).length;
     return {
       colleges: d.length,
       people: d.reduce((s, c) => s + c.participants, 0),
       paid: d.reduce((s, c) => s + c.paid, 0),
       due: d.reduce((s, c) => s + c.due, 0),
-      unverified: d.filter((c) => !c.college.isVerified).length,
+      verified: d.length - unverified,
+      unverified,
     };
   }, [contingents.data]);
 
@@ -169,6 +175,18 @@ export function CollegesScreen() {
 
   const focused = openId ? (contingents.data ?? []).find((c) => c.college.id === openId) : null;
 
+  const facets: Facet[] = [
+    {
+      key: "verification",
+      label: "Verification",
+      selected: facetState.verification ?? [],
+      options: [
+        { value: "verified", label: "Verified", count: totals.verified },
+        { value: "unverified", label: "Unverified", count: totals.unverified },
+      ],
+    },
+  ];
+
   return (
     <Page>
       <PageHeader
@@ -196,10 +214,16 @@ export function CollegesScreen() {
         }
       />
 
-      <StatGrid cols={4}>
+      <StatGrid cols={5}>
         <NeoStatTile label="Colleges" value={totals.colleges} icon={<Building2 />} />
         <NeoStatTile label="Participants" value={totals.people.toLocaleString("en-IN")} />
         <NeoStatTile label="Collected" value={inr(totals.paid, { compact: true })} />
+        <NeoStatTile
+          label="Verified colleges"
+          value={totals.verified}
+          icon={<BadgeCheck />}
+          deltaLabel="Nomination letter checked"
+        />
         <NeoStatTile
           label="Unverified institutions"
           value={totals.unverified}
@@ -212,9 +236,12 @@ export function CollegesScreen() {
         search={search}
         onSearch={setSearch}
         searchPlaceholder="College name, short name or city…"
-        facets={[]}
-        onFacetChange={() => {}}
-        onClearAll={() => setSearch("")}
+        facets={facets}
+        onFacetChange={(k, v) => setFacetState((s) => ({ ...s, [k]: v }))}
+        onClearAll={() => {
+          setSearch("");
+          setFacetState({});
+        }}
         resultCount={rows.length}
         totalCount={contingents.data?.length}
       />

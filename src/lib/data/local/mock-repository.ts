@@ -1830,21 +1830,41 @@ export class MockRepository implements Repository {
     list: async () => clone(this.d.colleges),
     get: async (id: string) => clone(this.d.colleges.find((c) => c.id === id) ?? null),
 
-    contingents: async () => {
+    contingents: async (eventId?: string) => {
+      // Unlike the Http repository, the mock store has no global event-scope
+      // selector wired through it anywhere else — this only narrows the
+      // contingent when a caller passes eventId explicitly.
+      const scope = eventId;
       return clone(
         this.d.colleges
           .map((college) => {
-            const people = this.d.participants.filter((p) => p.collegeId === college.id);
+            let people = this.d.participants.filter((p) => p.collegeId === college.id);
+            // Event scope narrows the contingent to people actually registered
+            // for that event — a college's total headcount and its footprint
+            // in one event are different numbers.
+            if (scope) {
+              const registeredIds = new Set(
+                this.d.registrations
+                  .filter((r) => r.eventId === scope && r.status !== "cancelled" && r.status !== "rejected")
+                  .map((r) => r.participantId),
+              );
+              people = people.filter((p) => registeredIds.has(p.id));
+            }
             const ids = new Set(people.map((p) => p.id));
             const confirmed = this.d.registrations.filter(
-              (r) => ids.has(r.participantId) && r.status === "confirmed",
+              (r) =>
+                ids.has(r.participantId) &&
+                r.status === "confirmed" &&
+                (!scope || r.eventId === scope),
             ).length;
             let paid = 0;
             let due = 0;
+            let paidPeople = 0;
             for (const p of people) {
               const np = this.netPaid(p.id);
               paid += np;
               due += Math.max(0, this.grossDue(p.id) - np);
+              if (np > 0) paidPeople++;
             }
             const arrivals = this.d.travel
               .filter((t) => ids.has(t.participantId) && t.direction === "arrival")
@@ -1854,6 +1874,7 @@ export class MockRepository implements Repository {
               college,
               participants: people.length,
               confirmed,
+              paidPeople,
               paid,
               due,
               accommodation: this.d.allotments.filter((a) => ids.has(a.participantId)).length,
@@ -1890,6 +1911,14 @@ export class MockRepository implements Repository {
       const ev = this.d.events.find((e) => e.id === eventId);
       const confirmedCount = regs.filter((r) => r.status === "confirmed").length;
       const pendingCount = regs.filter((r) => r.status === "pending").length;
+      // A "Team 2–10" event's capacity is team slots, not people — a 6-person
+      // team occupies one slot the same as a 2-person one, so a solo event's
+      // headcount and a team event's fill are counted differently.
+      const isTeamEvent = (ev?.maxTeamSize ?? 1) > 1;
+      const live = regs.filter((r) => r.status === "confirmed" || r.status === "pending");
+      const filled = isTeamEvent
+        ? new Set(live.filter((r) => r.teamId).map((r) => r.teamId as string)).size
+        : live.length;
       const ids = new Set(regs.map((r) => r.id));
       const revenue = this.d.payments
         .filter((p) => p.status === "verified" && p.registrationIds.some((r) => ids.has(r)))
@@ -1901,7 +1930,8 @@ export class MockRepository implements Repository {
         waitlistCount: regs.filter((r) => r.status === "waitlisted").length,
         checkedInCount: this.d.attendance.filter((a) => a.eventId === eventId).length,
         capacity: ev?.capacity ?? null,
-        seatsLeft: ev?.capacity != null ? ev.capacity - confirmedCount - pendingCount : null,
+        seatsLeft: ev?.capacity != null ? ev.capacity - filled : null,
+        filled,
         revenue,
       };
     },

@@ -572,6 +572,14 @@ export interface EventStats {
   capacity: number | null;
   seatsLeft: number | null;
   revenue: number;
+  /**
+   * What actually counts against `capacity` for the fill-rate display.
+   * `confirmedCount + pendingCount` for a solo event; distinct teams with a
+   * live (confirmed/pending) registration for a team event — a "Team 2–10"
+   * event with capacity 20 means 20 team slots, not 20 people, so a 6-person
+   * team occupies one slot the same as a 2-person one.
+   */
+  filled: number;
 }
 
 export interface OverviewStats {

@@ -12,6 +12,8 @@ import {
   CalendarDays,
   Phone,
   ArrowLeftRight,
+  Wallet,
+  Clock,
 } from "lucide-react";
 import { Page, PageHeader, StatGrid } from "@/frontend/components/page";
 import {
@@ -58,6 +60,9 @@ export function CollegesScreen() {
     const verification = facetState.verification?.[0];
     if (verification === "verified") d = d.filter((c) => c.college.isVerified);
     else if (verification === "unverified") d = d.filter((c) => !c.college.isVerified);
+    const payment = facetState.payment?.[0];
+    if (payment === "confirmed") d = d.filter((c) => c.paidPeople > 0);
+    else if (payment === "awaiting") d = d.filter((c) => c.paidPeople === 0);
     if (!dSearch) return d;
     const q = dSearch.toLowerCase();
     return d.filter(
@@ -71,6 +76,10 @@ export function CollegesScreen() {
   const totals = useMemo(() => {
     const d = contingents.data ?? [];
     const unverified = d.filter((c) => !c.college.isVerified).length;
+    // "Confirmed" here means real money in, not just a name on a list — at
+    // least one person from that college has a verified payment. A college
+    // with a dozen profiles and zero paid people is still just names.
+    const confirmedColleges = d.filter((c) => c.paidPeople > 0).length;
     return {
       colleges: d.length,
       people: d.reduce((s, c) => s + c.participants, 0),
@@ -78,6 +87,8 @@ export function CollegesScreen() {
       due: d.reduce((s, c) => s + c.due, 0),
       verified: d.length - unverified,
       unverified,
+      confirmedColleges,
+      awaitingPayment: d.length - confirmedColleges,
     };
   }, [contingents.data]);
 
@@ -185,6 +196,15 @@ export function CollegesScreen() {
         { value: "unverified", label: "Unverified", count: totals.unverified },
       ],
     },
+    {
+      key: "payment",
+      label: "Payment",
+      selected: facetState.payment ?? [],
+      options: [
+        { value: "confirmed", label: "Confirmed", count: totals.confirmedColleges },
+        { value: "awaiting", label: "Awaiting payment", count: totals.awaitingPayment },
+      ],
+    },
   ];
 
   return (
@@ -199,11 +219,11 @@ export function CollegesScreen() {
             icon={<Download />}
             onClick={() =>
               downloadCsv("contingents.csv", [
-                ["College", "Short", "City", "State", "Verified", "Participants", "Confirmed", "Paid", "Due", "Beds", "Lead", "Lead phone", "Faculty escort"],
+                ["College", "Short", "City", "State", "Verified", "Participants", "Confirmed", "Paid people", "Paid", "Due", "Beds", "Lead", "Lead phone", "Faculty escort"],
                 ...rows.map((r) => [
                   r.college.name, r.college.shortName, r.college.city, r.college.state,
                   r.college.isVerified ? "yes" : "no", r.participants, r.confirmed,
-                  r.paid, r.due, r.accommodation, r.college.contactName,
+                  r.paidPeople, r.paid, r.due, r.accommodation, r.college.contactName,
                   r.college.contactPhone, r.college.facultyEscortName ?? "",
                 ]),
               ])
@@ -214,7 +234,7 @@ export function CollegesScreen() {
         }
       />
 
-      <StatGrid cols={5}>
+      <StatGrid cols={4}>
         <NeoStatTile label="Colleges" value={totals.colleges} icon={<Building2 />} />
         <NeoStatTile label="Participants" value={totals.people.toLocaleString("en-IN")} />
         <NeoStatTile label="Collected" value={inr(totals.paid, { compact: true })} />
@@ -229,6 +249,18 @@ export function CollegesScreen() {
           value={totals.unverified}
           icon={<AlertTriangle />}
           deltaLabel="Nomination letter not checked"
+        />
+        <NeoStatTile
+          label="Confirmed colleges"
+          value={totals.confirmedColleges}
+          icon={<Wallet />}
+          deltaLabel="At least one verified payment"
+        />
+        <NeoStatTile
+          label="Awaiting payment"
+          value={totals.awaitingPayment}
+          icon={<Clock />}
+          deltaLabel="Registered, nobody has paid yet"
         />
       </StatGrid>
 
@@ -750,11 +782,14 @@ export function EventsScreen() {
       sortValue: (e) => {
         const s = statMap.get(e.id);
         if (!e.capacity || !s) return 0;
-        return (s.confirmedCount + s.pendingCount) / e.capacity;
+        return s.filled / e.capacity;
       },
       cell: (e) => {
         const s = statMap.get(e.id);
-        const filled = (s?.confirmedCount ?? 0) + (s?.pendingCount ?? 0);
+        // Team events fill by team, not by head — a "Team 2–10" event's
+        // capacity is slots, and a 6-person team fills one the same as a
+        // 2-person one.
+        const filled = s?.filled ?? 0;
         if (!e.capacity) return <span className="text-[0.75rem] text-ink-faint">Unlimited</span>;
         const over = filled > e.capacity;
         return (
@@ -821,7 +856,7 @@ export function EventsScreen() {
         .filter((e) => e.capacity != null && e.status !== "cancelled")
         .map((e) => {
           const s = statMap.get(e.id);
-          const filled = (s?.confirmedCount ?? 0) + (s?.pendingCount ?? 0);
+          const filled = s?.filled ?? 0;
           return {
             id: e.id,
             label: e.title,

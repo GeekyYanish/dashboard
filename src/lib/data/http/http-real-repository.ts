@@ -388,7 +388,7 @@ function toAuditEvent(value: any): AuditEvent {
   return {
     id: value.id,
     actorId: value.actorId,
-    actorName: value.actorName ?? value.actorEmail ?? value.actorId,
+    actorName: value.actorName ?? value.actorEmail ?? value.actorId ?? "System",
     action: value.action,
     entity: value.targetType,
     entityId: value.targetId,

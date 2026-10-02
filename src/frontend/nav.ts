@@ -61,7 +61,7 @@ export const NAV: NavSection[] = [
         href: "/registrations",
         label: "Registrations",
         icon: ClipboardList,
-        match: ["/registrations/import", "/registrations/new", "/registrations/duplicates", "/registrations/clashes", "/registrations/waitlist"],
+        match: ["/registrations/users", "/registrations/import", "/registrations/new", "/registrations/duplicates", "/registrations/clashes", "/registrations/waitlist"],
       },
       { href: "/participants", label: "Participants", icon: Users },
       { href: "/colleges", label: "Colleges", icon: Building2 },

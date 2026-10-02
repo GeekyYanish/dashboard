@@ -341,7 +341,8 @@ export class HttpPayments implements PaymentRepo {
 }
 
 function toEvent(value: any): FestEvent {
-  const track = value.categorySlug?.includes("gaming") ? "gaming" : value.categorySlug?.includes("quiz") ? "literary" : value.categorySlug?.includes("design") ? "design" : value.categorySlug?.includes("culture") ? "cultural" : "technical";
+  const cat = String(value.categorySlug || "").toLowerCase();
+  const track = cat.includes("gaming") ? "gaming" : cat.includes("quiz") || cat.includes("literary") ? "literary" : cat.includes("design") ? "design" : cat.includes("culture") || cat.includes("cultural") || cat.includes("non") ? "cultural" : "technical";
   return { id: value.id, slug: value.slug, title: value.title, track: track as any, minTeamSize: value.minTeamSize ?? 1, maxTeamSize: value.maxTeamSize ?? 1, capacity: value.capacity ?? null, feeInr: value.feeAmount ?? 0, venue: value.venue ?? "—", day: value.startsAt?.slice(0, 10) ?? "2026-10-08", startsAt: iso(value.startsAt), endsAt: iso(value.endsAt), registrationClosesAt: value.registrationClosesAt ? iso(value.registrationClosesAt) : value.endsAt, requiresIndemnity: false, status: value.status, coordinatorName: "—", coordinatorPhone: "—" };
 }
 

@@ -107,6 +107,8 @@ export interface Participant {
   createdAt: string;
   createdVia: "online" | "on_spot" | "csv_import";
   isBlocked: boolean;
+  festAttendance?: boolean;
+  festCheckedInAt?: string | null;
 }
 
 /** Derived, never stored: under-18 on the fest start date needs guardian consent. */

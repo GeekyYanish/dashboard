@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- backend JSON is validated at the API boundary. */
 import { api } from "./api-client";
 import { selectedEventId } from "./scope";
-import type { AuthRepo, AuditRepo, OverviewRepo, ParticipantRepo, RegistrationRepo, PaymentRepo, EventRepo, TeamRepo, StaffRepo, AdminRepo, CollegeRepo, Actor, ImportPreview } from "../repository";
+import type { AuthRepo, AuditRepo, OverviewRepo, ParticipantRepo, RegistrationRepo, PaymentRepo, EventRepo, TeamRepo, StaffRepo, AdminRepo, CollegeRepo, AttendanceRepo, Actor, ImportPreview } from "../repository";
 import type { Session } from "../../auth/session";
-import type { AttentionItem, AuditEvent, Announcement, College, PassTier, EventStats, FestEvent, OverviewStats, Participant, ParticipantFlags, Payment, PaymentStatus, Registration, RegistrationStatus, StaffMember, SubstitutionRequest, Team } from "../types";
+import type { AttentionItem, AuditEvent, Announcement, Attendance, College, PassTier, EventStats, FestEvent, OverviewStats, Participant, ParticipantFlags, Payment, PaymentStatus, Registration, RegistrationStatus, StaffMember, SubstitutionRequest, Team } from "../types";
 import { DataError, isDataError } from "../types";
 import { type PaymentMethodId, type StaffRoleId } from "../../fest.config";
 
@@ -103,6 +103,8 @@ function toParticipant(value: any): Participant {
     createdAt: iso(value.createdAt),
     createdVia: "online",
     isBlocked: Boolean(value.isBanned),
+    festAttendance: Boolean(value.festAttendance),
+    festCheckedInAt: value.festCheckedInAt ?? null,
   };
 }
 
@@ -444,6 +446,47 @@ export class HttpOverview implements OverviewRepo {
   async activity(limit = 20): Promise<AuditEvent[]> { return new HttpAudit().list({ limit }); }
   async announcements(): Promise<Announcement[]> { return []; }
 }
+
+export class HttpAttendance implements AttendanceRepo {
+  async list(day?: string, eventId?: string): Promise<Attendance[]> {
+    const rows = await api.get<any[]>("/api/v1/admin/attendance");
+    return rows.map((row) => ({
+      id: row.id,
+      participantId: row.participantId,
+      eventId: row.eventId ?? null,
+      registrationId: row.registrationId ?? null,
+      method: row.method ?? "manual",
+      checkedInAt: row.checkedInAt,
+      scannedBy: row.scannedBy ?? null,
+      day: row.day
+    })).filter(a => (!day || a.day === day) && (!eventId || a.eventId === eventId));
+  }
+  async checkIn(input: { participantId: string; eventId?: string | null; method?: "qr" | "manual" | "self" }) {
+    const res = await api.post<any>("/api/v1/admin/attendance/check-in", {
+      participantId: input.participantId,
+      eventId: input.eventId ?? null,
+      method: input.method ?? "manual",
+    });
+    return {
+      record: {
+        id: res.record.id,
+        participantId: res.record.participantId,
+        eventId: res.record.eventId ?? null,
+        registrationId: res.record.registrationId ?? null,
+        method: res.record.method ?? "manual",
+        checkedInAt: res.record.checkedInAt,
+        scannedBy: res.record.scannedBy ?? null,
+        day: res.record.day
+      },
+      wasAlready: res.wasAlready
+    };
+  }
+  async noShows(eventId: string) {
+    const rows = await api.get<any[]>(`/api/v1/admin/events/${eventId}/no-shows`);
+    return rows.map(r => toRegistration(r));
+  }
+}
+
 
 export class HttpStaff implements StaffRepo {
   async list() {

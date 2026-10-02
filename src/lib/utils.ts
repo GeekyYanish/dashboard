@@ -87,3 +87,45 @@ export function parseCsv(text: string): string[][] {
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Deterministic download of a client-built Excel workbook. Uses SheetJS (xlsx)
+ * which runs entirely in the browser — no server round-trip, no latency.
+ *
+ * `rows` is the same header+data format as `downloadCsv`. The first row is
+ * treated as the column headers.
+ */
+export function downloadExcel(filename: string, rows: (string | number | null)[][]) {
+  // Dynamic import keeps the xlsx bundle out of the initial page load.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const XLSX = require("xlsx");
+
+  const worksheet = XLSX.utils.aoa_to_sheet(rows);
+
+  // Auto-fit column widths: scan every cell per column, keep the longest.
+  const colWidths: number[] = [];
+  for (const row of rows) {
+    row.forEach((cell, i) => {
+      const len = cell == null ? 0 : String(cell).length;
+      colWidths[i] = Math.max(colWidths[i] ?? 0, len);
+    });
+  }
+  worksheet["!cols"] = colWidths.map((w) => ({ wch: Math.min(w + 2, 60) }));
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Teams");
+
+  const buffer: ArrayBuffer = XLSX.write(workbook, {
+    bookType: "xlsx",
+    type: "array",
+  });
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}

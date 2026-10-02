@@ -41,7 +41,7 @@ import { getRepo } from "@/lib/data";
 import { isDataError, type FestEvent, type Team } from "@/lib/data/types";
 import { TRACKS, inr } from "@/lib/fest.config";
 import { EVENT_TONE, titleCase } from "@/frontend/status";
-import { downloadCsv, relativeTime } from "@/lib/utils";
+import { downloadCsv, downloadExcel, relativeTime } from "@/lib/utils";
 
 /* ==========================================================================
    Colleges — the contingent view. A national fest is negotiated with
@@ -402,8 +402,113 @@ export function TeamsScreen() {
   const teams = useAsync(() => getRepo().teams.list(), []);
   const incomplete = useAsync(() => getRepo().teams.incomplete(), []);
   const subs = useAsync(() => getRepo().teams.substitutions(), []);
+  const registrations = useAsync(() => getRepo().registrations.list(), []);
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+
+  /** Build a participant → registration-status + payment-status index once. */
+  const regIndex = useMemo(() => {
+    const map = new Map<string, { eventId: string; status: string; paymentStatus: string }[]>();
+    for (const r of registrations.data ?? []) {
+      const key = r.participantId;
+      const list = map.get(key) ?? [];
+      list.push({ eventId: r.eventId, status: r.status, paymentStatus: r.paymentStatus ?? "—" });
+      map.set(key, list);
+    }
+    return map;
+  }, [registrations.data]);
+
+  const handleExportExcel = () => {
+    const allTeams = teams.data ?? [];
+    if (allTeams.length === 0) {
+      toast.info("Nothing to export", "No teams loaded yet.");
+      return;
+    }
+
+    const header = [
+      "Team Name",
+      "Join Code",
+      "Event Name",
+      "Team Leader Name",
+      "Team Leader Email",
+      "Team Leader Phone",
+      "Team Leader College",
+      "Team Size",
+      "Min Team Size",
+      "Max Team Size",
+      "Roster Status",
+      "Member Names",
+      "Member Emails",
+      "Member Phones",
+      "Member Colleges",
+      "Member Registration Statuses",
+      "Member Payment Statuses",
+      "Created At",
+    ];
+
+    const rows: (string | number | null)[][] = [header];
+
+    for (const team of allTeams) {
+      const event = lookups.event(team.eventId);
+      const leader = lookups.participant(team.leaderParticipantId);
+      const leaderCollege = leader ? lookups.college(leader.collegeId) : undefined;
+
+      // Collect member details (excluding the leader row from the list if desired)
+      const memberNames: string[] = [];
+      const memberEmails: string[] = [];
+      const memberPhones: string[] = [];
+      const memberColleges: string[] = [];
+      const memberRegStatuses: string[] = [];
+      const memberPayStatuses: string[] = [];
+
+      for (const mid of team.memberIds) {
+        const p = lookups.participant(mid);
+        const college = p ? lookups.college(p.collegeId) : undefined;
+        memberNames.push(p?.fullName ?? "Unknown");
+        memberEmails.push(p?.email ?? "—");
+        memberPhones.push(p?.phone ?? "—");
+        memberColleges.push(college?.shortName ?? college?.name ?? p?.collegeName ?? p?.customCollegeName ?? "—");
+
+        // Find this participant's registration for this specific event
+        const regs = regIndex.get(mid) ?? [];
+        const eventReg = regs.find((r) => r.eventId === team.eventId);
+        memberRegStatuses.push(eventReg?.status ?? "—");
+        memberPayStatuses.push(eventReg?.paymentStatus ?? "—");
+      }
+
+      rows.push([
+        team.name,
+        team.joinCode,
+        event?.title ?? team.eventId,
+        leader?.fullName ?? "Unknown",
+        leader?.email ?? "—",
+        leader?.phone ?? "—",
+        leaderCollege?.shortName ?? leaderCollege?.name ?? leader?.collegeName ?? leader?.customCollegeName ?? "—",
+        team.memberIds.length,
+        event?.minTeamSize ?? "—",
+        event?.maxTeamSize ?? "—",
+        team.isLocked ? "Locked" : "Open",
+        memberNames.join(", "),
+        memberEmails.join(", "),
+        memberPhones.join(", "),
+        memberColleges.join(", "),
+        memberRegStatuses.join(", "),
+        memberPayStatuses.join(", "),
+        team.createdAt
+          ? new Date(team.createdAt).toLocaleString("en-IN", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "—",
+      ]);
+    }
+
+    downloadExcel("teams_export.xlsx", rows);
+    toast.success("Export ready", `${allTeams.length} teams exported to Excel.`);
+  };
 
   const columns: Column<Team>[] = [
     {
@@ -469,6 +574,17 @@ export function TeamsScreen() {
       <PageHeader
         title="Teams"
         description="Rosters, join codes and substitutions. A team below its event's minimum size cannot compete — those are surfaced first."
+        actions={
+          <NeoButton
+            size="sm"
+            variant="secondary"
+            icon={<Download />}
+            disabled={teams.loading || lookups.loading || registrations.loading}
+            onClick={handleExportExcel}
+          >
+            Export Excel
+          </NeoButton>
+        }
       />
 
       <StatGrid cols={3}>

@@ -263,6 +263,15 @@ export interface PaymentRepo {
     note?: string,
   ): Promise<Payment>;
   bulkReview(ids: string[], decision: "verified" | "rejected", note?: string): Promise<number>;
+  /**
+   * Reverses an already-verified payment — Registration Head only.
+   *
+   * Cancels every registration that payment had confirmed. This is not a
+   * refund: it records that the payment is void and undoes what it confirmed,
+   * not that money has actually moved. Throws NOT_VERIFIED for anything other
+   * than a verified payment.
+   */
+  cancel(id: string, reason: string): Promise<Payment>;
   /** Recomputes fraud flags across the ledger. */
   runFraudSweep(): Promise<Payment[]>;
   outstanding(): Promise<
@@ -305,12 +314,23 @@ export interface CouponRepo {
 export interface CollegeRepo {
   list(): Promise<College[]>;
   get(id: string): Promise<College | null>;
-  /** Contingent rollup — size, money, accommodation, arrival. */
-  contingents(): Promise<
+  /**
+   * Contingent rollup — size, money, accommodation, arrival.
+   *
+   * `eventId` scopes `participants`/`confirmed`/`paidPeople`/`paid`/`due` to
+   * people from that college registered for that one event; omitted, it falls
+   * back to the console's globally selected event scope (fest-wide when
+   * nothing is selected). `paidPeople` is what a college needs to actually be
+   * "confirmed" — a nonzero `paid` total can still be a single early payer in
+   * an otherwise unpaid contingent.
+   */
+  contingents(eventId?: string): Promise<
     {
       college: College;
       participants: number;
       confirmed: number;
+      /** Distinct people with a verified payment — zero means nobody here has paid yet. */
+      paidPeople: number;
       paid: number;
       due: number;
       accommodation: number;
@@ -463,7 +483,17 @@ export interface StaffRepo {
     temporaryPassword: string;
     role: StaffRoleId;
     eventId: string | null;
-  }): Promise<StaffMember>;
+    /** `true` when the email already had an account that was promoted rather
+     *  than a new one created — the caller says so, because the two outcomes
+     *  need different wording. */
+  }): Promise<StaffMember & { promoted?: boolean }>;
+  /**
+   * A Registration Head setting someone else's password — the only recovery
+   * path for a staff member who never received their temporary one and cannot
+   * reach the email on the account. Forces a change on next sign-in and ends
+   * that member's live sessions.
+   */
+  resetPassword?(id: string, temporaryPassword: string): Promise<void>;
   grantAssignment?(id: string, role: StaffRoleId, eventId: string | null): Promise<StaffMember>;
   revokeAssignment?(id: string, assignmentId: string): Promise<StaffMember>;
   /** Verifications done, walk-ins handled, tickets closed — per member. */

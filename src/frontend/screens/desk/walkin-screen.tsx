@@ -30,6 +30,9 @@ import { PAYMENT_METHODS, inr } from "@/lib/fest.config";
  * the participant exists even if enrolment fails, and they are enrolled even
  * if payment is not yet taken.
  */
+/** Sentinel select value for "their college isn't in the list" — never sent to the backend. */
+const OTHER_COLLEGE = "__other__";
+
 export function WalkInScreen() {
   const events = useAsync(() => getRepo().events.list(), []);
   const tiers = useAsync(() => getRepo().payments.entryPassTiers(), []);
@@ -75,13 +78,15 @@ export function WalkInScreen() {
   async function createPerson() {
     setBusy(true);
     try {
+      const usingCustomCollege = draft.collegeId === OTHER_COLLEGE;
       const created = await getRepo().participants.create({
         fullName: draft.fullName.trim(),
         email: draft.email.trim(),
         phone: draft.phone.trim(),
         gender: draft.gender as Participant["gender"],
         dateOfBirth: draft.dateOfBirth,
-        collegeId: draft.collegeId,
+        collegeId: usingCustomCollege ? "" : draft.collegeId,
+        customCollegeName: usingCustomCollege ? draft.customCollegeName.trim() : undefined,
         department: draft.department,
         yearOfStudy: Number(draft.yearOfStudy) || 0,
         category: "participant",
@@ -234,8 +239,17 @@ export function WalkInScreen() {
                   options={[
                     { value: "", label: "Choose…" },
                     ...lookups.colleges.map((c) => ({ value: c.id, label: c.shortName })),
+                    { value: OTHER_COLLEGE, label: "Not listed — type it in" },
                   ]}
                 />
+                {draft.collegeId === OTHER_COLLEGE ? (
+                  <NeoInput
+                    label="College name"
+                    value={draft.customCollegeName}
+                    onChange={(e) => setDraft((d) => ({ ...d, customCollegeName: e.target.value }))}
+                    placeholder="Type the institution's full name"
+                  />
+                ) : null}
                 <NeoSelect
                   label="Department"
                   value={draft.department}
@@ -297,7 +311,12 @@ export function WalkInScreen() {
               <NeoButton
                 icon={<UserPlus />}
                 onClick={createPerson}
-                disabled={busy || !draft.fullName.trim() || !draft.email.trim()}
+                disabled={
+                  busy ||
+                  !draft.fullName.trim() ||
+                  !draft.email.trim() ||
+                  (draft.collegeId === OTHER_COLLEGE && !draft.customCollegeName.trim())
+                }
               >
                 Add participant
               </NeoButton>

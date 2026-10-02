@@ -17,6 +17,8 @@ import {
   NeoTabs,
   NeoSkeleton,
   NeoModal,
+  NeoSelect,
+  NeoTooltip,
   toast,
   type Column,
   type SortState,
@@ -26,7 +28,7 @@ import { useAsync, useDebounced } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
 import { isDataError, type Participant } from "@/lib/data/types";
-import { CATEGORIES, DOC_TYPES, inr } from "@/lib/fest.config";
+import { CATEGORIES, DOC_TYPES, inr, type CategoryId } from "@/lib/fest.config";
 import {
   ACCOMMODATION_TONE,
   DOC_TONE,
@@ -37,7 +39,7 @@ import {
   titleCase,
 } from "@/frontend/status";
 import { downloadCsv, relativeTime } from "@/lib/utils";
-import { useAuth } from "@/frontend/hooks/use-auth";
+import { useAuth, useCan } from "@/frontend/hooks/use-auth";
 
 export function ParticipantsScreen() {
   const params = useSearchParams();
@@ -122,10 +124,15 @@ export function ParticipantsScreen() {
     {
       key: "college",
       header: "College",
-      sortValue: (p) => lookups.college(p.collegeId)?.shortName ?? "",
+      // Falls back to the typed name for someone whose institution wasn't in
+      // the reference list — lookups.college() resolves nothing for them
+      // since they have no real collegeId.
+      sortValue: (p) => lookups.college(p.collegeId)?.shortName ?? p.collegeName ?? "",
       cell: (p) => (
         <div className="min-w-0">
-          <div className="truncate text-ink-soft">{lookups.college(p.collegeId)?.shortName}</div>
+          <div className="truncate text-ink-soft">
+            {lookups.college(p.collegeId)?.shortName ?? p.collegeName ?? "—"}
+          </div>
           <div className="truncate text-[0.72rem] text-ink-faint">
             {p.department}, Y{p.yearOfStudy}
           </div>
@@ -179,7 +186,7 @@ export function ParticipantsScreen() {
     <Page>
       <PageHeader
         title="Participants"
-        description="Everyone attending, in every category — competitors, delegates, accompanists, faculty escorts, volunteers and guests."
+        description="Everyone attending, in every category — competitors, delegates, faculty escorts and volunteers."
         actions={
           <NeoButton
             size="sm"
@@ -190,7 +197,7 @@ export function ParticipantsScreen() {
                 ["Code", "Name", "Email", "Phone", "Gender", "DOB", "College", "Department", "Year", "Category", "T-shirt", "Diet", "Emergency", "Registered"],
                 ...(rows.data ?? []).map((p) => [
                   p.code, p.fullName, p.email, p.phone, p.gender, p.dateOfBirth,
-                  lookups.college(p.collegeId)?.name ?? "", p.department, p.yearOfStudy,
+                  lookups.college(p.collegeId)?.name ?? p.collegeName ?? "", p.department, p.yearOfStudy,
                   p.category, p.tshirtSize, p.dietaryPref,
                   `${p.emergencyName} ${p.emergencyPhone}`, p.createdAt,
                 ]),
@@ -262,9 +269,11 @@ function ParticipantDrawer({
   const lookups = useLookups();
   const { role } = useAuth();
   const canExportPersonalData = role === "head";
+  const { allowed: canRecategorize, reason: recategorizeReason } = useCan("participants.recategorize");
   const [tab, setTab] = useState<Tab>("profile");
   const [eraseOpen, setEraseOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [savingCategory, setSavingCategory] = useState(false);
 
   const p = participantId ? lookups.participant(participantId) : undefined;
   const flags = useAsync(
@@ -367,9 +376,51 @@ function ParticipantDrawer({
                   <span className="font-display text-[1rem] font-semibold text-ink">
                     {p.fullName}
                   </span>
-                  <StatusBadge tone="info" size="sm" dot={false}>
-                    {CATEGORIES.find((c) => c.id === p.category)?.label}
-                  </StatusBadge>
+                  {canRecategorize ? (
+                    <NeoSelect
+                      aria-label="Category"
+                      value={p.category}
+                      disabled={savingCategory}
+                      className="w-auto"
+                      options={CATEGORIES.map((c) => ({ value: c.id, label: c.label }))}
+                      onChange={async (e) => {
+                        const next = e.target.value as CategoryId;
+                        if (next === p.category) return;
+                        setSavingCategory(true);
+                        try {
+                          const updated = await getRepo().participants.update(p.id, { category: next });
+                          // `p` comes from this drawer's own useLookups() cache, which
+                          // the list-level onChanged() below never touches — without
+                          // this the select silently snaps back to the old value.
+                          lookups.reload();
+                          onChanged();
+                          if (updated.category === next) {
+                            toast.success(
+                              "Category updated",
+                              `${p.fullName} is now a ${CATEGORIES.find((c) => c.id === updated.category)?.label}.`,
+                            );
+                          } else {
+                            // The request didn't throw, but the server didn't apply it
+                            // either — trust what it actually persisted, not the click.
+                            toast.error(
+                              "Category not changed",
+                              "The server did not apply this change — check permissions and try again.",
+                            );
+                          }
+                        } catch (err) {
+                          toast.error(isDataError(err) ? err.message : "Could not change category");
+                        } finally {
+                          setSavingCategory(false);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <NeoTooltip content={recategorizeReason ?? "Not permitted for your role"}>
+                      <StatusBadge tone="info" size="sm" dot={false}>
+                        {CATEGORIES.find((c) => c.id === p.category)?.label}
+                      </StatusBadge>
+                    </NeoTooltip>
+                  )}
                   {flags.data?.isMinor ? (
                     <StatusBadge tone="pending" size="sm" dot={false}>
                       Under 18
@@ -382,7 +433,7 @@ function ParticipantDrawer({
                   ) : null}
                 </div>
                 <p className="mt-1 text-[0.78rem] text-ink-muted">
-                  {college?.name} · {p.department}, Year {p.yearOfStudy}
+                  {college?.name ?? p.collegeName} · {p.department}, Year {p.yearOfStudy}
                 </p>
                 <p className="mt-0.5 font-mono text-[0.74rem] text-ink-muted">
                   {p.phone} · {p.email}
@@ -437,7 +488,7 @@ function ParticipantDrawer({
                 <div>
                   <SectionRule label="Contingent" className="mb-2" />
                   <dl className="divide-y divide-hairline">
-                    <KeyValue label="College" value={college?.name ?? "—"} />
+                    <KeyValue label="College" value={college?.name ?? p.collegeName ?? "—"} />
                     <KeyValue label="Contingent lead" value={college?.contactName ?? "—"} />
                     <KeyValue label="Lead phone" value={college?.contactPhone ?? "—"} mono />
                     <KeyValue label="Faculty escort" value={college?.facultyEscortName ?? "None"} />

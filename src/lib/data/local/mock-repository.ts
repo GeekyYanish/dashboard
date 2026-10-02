@@ -18,6 +18,7 @@
 
 import {
   CATEGORIES,
+  categoryCountsTowardRevenue,
   DOC_TYPES,
   FEES,
   FEST,
@@ -263,6 +264,16 @@ export class MockRepository implements Repository {
   // Derived helpers used across modules
   // =========================================================================
 
+  /**
+   * Whether a participant's money counts toward fest revenue. Volunteers,
+   * delegates and faculty escorts are checking or supporting the flow, not
+   * paying for it — only the "participant" category is real revenue.
+   */
+  private countsTowardRevenue(participantId: string): boolean {
+    const p = this.indexes().participantsById.get(participantId);
+    return p ? categoryCountsTowardRevenue(p.category) : true;
+  }
+
   /** Net verified money for a participant, minus refunds already paid out. */
   private netPaid(participantId: string): number {
     const ix = this.indexes();
@@ -411,12 +422,16 @@ export class MockRepository implements Repository {
       const cancelled = d.registrations.filter((r) => r.status === "cancelled").length;
 
       const verified = d.payments.filter((p) => p.status === "verified");
-      const revenueCollected = verified.reduce((s, p) => s + p.amount, 0);
+      // Volunteers, delegates and faculty escorts are checking or supporting
+      // the flow, not paying for it — every revenue figure below counts only
+      // the "participant" category's registrations and payments.
+      const revenueVerified = verified.filter((p) => this.countsTowardRevenue(p.participantId));
+      const revenueCollected = revenueVerified.reduce((s, p) => s + p.amount, 0);
       const queue = d.payments.filter((p) => p.status === "pending");
 
       const participantIds = new Set(live.map((r) => r.participantId));
       let expected = 0;
-      for (const id of participantIds) expected += this.grossDue(id);
+      for (const id of participantIds) if (this.countsTowardRevenue(id)) expected += this.grossDue(id);
 
       const outstanding = Math.max(0, expected - revenueCollected);
 
@@ -430,7 +445,7 @@ export class MockRepository implements Repository {
         const day = new Date(now().getTime() - i * 86400000);
         const key = day.toISOString().slice(0, 10);
         const regs = d.registrations.filter((r) => r.registeredAt.slice(0, 10) === key);
-        const pays = verified.filter((p) => p.submittedAt.slice(0, 10) === key);
+        const pays = revenueVerified.filter((p) => p.submittedAt.slice(0, 10) === key);
         series.push({
           date: key,
           registrations: regs.length,
@@ -440,7 +455,7 @@ export class MockRepository implements Repository {
       }
 
       const revenueByMethod = ["upi", "neft", "gateway", "cash"].map((m) => {
-        const rows = verified.filter((p) => p.method === m);
+        const rows = revenueVerified.filter((p) => p.method === m);
         return { method: m, amount: rows.reduce((s, p) => s + p.amount, 0), count: rows.length };
       });
 
@@ -453,8 +468,10 @@ export class MockRepository implements Repository {
       for (const p of d.participants) {
         const cur = collegeAgg.get(p.collegeId) ?? { count: 0, paid: 0, due: 0 };
         cur.count++;
-        cur.paid += this.netPaid(p.id);
-        cur.due += Math.max(0, this.grossDue(p.id) - this.netPaid(p.id));
+        if (this.countsTowardRevenue(p.id)) {
+          cur.paid += this.netPaid(p.id);
+          cur.due += Math.max(0, this.grossDue(p.id) - this.netPaid(p.id));
+        }
         collegeAgg.set(p.collegeId, cur);
       }
       const topColleges = [...collegeAgg.entries()]
@@ -478,7 +495,7 @@ export class MockRepository implements Repository {
 
       // Funnel — where people fall out between intent and turning up.
       const submitted = d.registrations.length;
-      const paidCount = new Set(verified.map((p) => p.participantId)).size;
+      const paidCount = new Set(revenueVerified.map((p) => p.participantId)).size;
       const funnel = [
         { stage: "Registered", count: submitted },
         { stage: "Payment submitted", count: d.payments.length },
@@ -487,7 +504,6 @@ export class MockRepository implements Repository {
         { stage: "Docs cleared", count: docCompleteness.filter((c) => !c.missing.length).length },
         { stage: "Checked in", count: new Set(d.attendance.map((a) => a.participantId)).size },
       ];
-      void paidCount;
 
       return {
         totalRegistrations: d.registrations.length,
@@ -496,6 +512,7 @@ export class MockRepository implements Repository {
         waitlisted,
         cancelled,
         participants: d.participants.length,
+        paidParticipants: paidCount,
         collegesOnboarded: new Set(d.participants.map((p) => p.collegeId)).size,
         revenueCollected,
         revenueExpected: expected,
@@ -711,6 +728,12 @@ export class MockRepository implements Repository {
     update: async (id: string, patch: Partial<Participant>) => {
       const rec = this.d.participants.find((p) => p.id === id);
       if (!rec) throw new DataError("NOT_FOUND");
+      // Recategorising someone changes what counts toward revenue, so it needs
+      // its own admin-only capability rather than riding along with the
+      // general-purpose profile-correction patch.
+      if (patch.category !== undefined && patch.category !== rec.category) {
+        this.assertCan("participants.recategorize");
+      }
       const before: Record<string, unknown> = {};
       for (const k of Object.keys(patch)) before[k] = (rec as unknown as Record<string, unknown>)[k];
       Object.assign(rec, patch);
@@ -1373,9 +1396,52 @@ export class MockRepository implements Repository {
             this.save("registrations", r);
           }
         }
+
+        // The first real payment from a college is treated as the paperwork
+        // check: a family/college that has actually paid is real, so the desk
+        // no longer has to separately click "Mark verified" for them. This
+        // never un-verifies — a college manually verified with zero payers
+        // still stays verified.
+        const payer = this.d.participants.find((p) => p.id === rec.participantId);
+        const college = payer ? this.d.colleges.find((c) => c.id === payer.collegeId) : undefined;
+        if (college && !college.isVerified) {
+          college.isVerified = true;
+          this.save("colleges", college);
+          this.log("college.verification_changed", "college", college.id, { isVerified: false }, {
+            isVerified: true,
+            reason: "auto-verified: first payment verified",
+          });
+        }
       }
       this.save("payments", rec);
       this.log(`payment.${decision}`, "payment", id, before, { status: rec.status, invoiceSerial: rec.invoiceSerial }, note);
+      return clone(rec);
+    },
+
+    /** Reverses an already-verified payment — Registration Head only. Not a refund: see the interface note. */
+    cancel: async (id: string, reason: string) => {
+      this.assertCan("refunds.approve");
+      const rec = this.d.payments.find((p) => p.id === id);
+      if (!rec) throw new DataError("NOT_FOUND");
+      if (rec.status !== "verified") throw new DataError("PAYMENT_NOT_VERIFIED", "Only a verified payment can be cancelled.");
+
+      const before = { status: rec.status };
+      rec.status = "cancelled" as never;
+      rec.reviewNote = reason;
+      this.save("payments", rec);
+
+      // Cancels every registration this payment had confirmed — the same set
+      // `review()` confirms on the way in.
+      for (const rid of rec.registrationIds) {
+        const r = this.d.registrations.find((x) => x.id === rid);
+        if (r && r.status === "confirmed") {
+          r.status = "cancelled";
+          r.cancelledAt = nowIso();
+          r.cancelReason = reason;
+          this.save("registrations", r);
+        }
+      }
+      this.log("payment.cancelled", "payment", id, before, { status: rec.status }, reason);
       return clone(rec);
     },
 
@@ -1780,21 +1846,41 @@ export class MockRepository implements Repository {
     list: async () => clone(this.d.colleges),
     get: async (id: string) => clone(this.d.colleges.find((c) => c.id === id) ?? null),
 
-    contingents: async () => {
+    contingents: async (eventId?: string) => {
+      // Unlike the Http repository, the mock store has no global event-scope
+      // selector wired through it anywhere else — this only narrows the
+      // contingent when a caller passes eventId explicitly.
+      const scope = eventId;
       return clone(
         this.d.colleges
           .map((college) => {
-            const people = this.d.participants.filter((p) => p.collegeId === college.id);
+            let people = this.d.participants.filter((p) => p.collegeId === college.id);
+            // Event scope narrows the contingent to people actually registered
+            // for that event — a college's total headcount and its footprint
+            // in one event are different numbers.
+            if (scope) {
+              const registeredIds = new Set(
+                this.d.registrations
+                  .filter((r) => r.eventId === scope && r.status !== "cancelled" && r.status !== "rejected")
+                  .map((r) => r.participantId),
+              );
+              people = people.filter((p) => registeredIds.has(p.id));
+            }
             const ids = new Set(people.map((p) => p.id));
             const confirmed = this.d.registrations.filter(
-              (r) => ids.has(r.participantId) && r.status === "confirmed",
+              (r) =>
+                ids.has(r.participantId) &&
+                r.status === "confirmed" &&
+                (!scope || r.eventId === scope),
             ).length;
             let paid = 0;
             let due = 0;
+            let paidPeople = 0;
             for (const p of people) {
               const np = this.netPaid(p.id);
               paid += np;
               due += Math.max(0, this.grossDue(p.id) - np);
+              if (np > 0) paidPeople++;
             }
             const arrivals = this.d.travel
               .filter((t) => ids.has(t.participantId) && t.direction === "arrival")
@@ -1804,6 +1890,7 @@ export class MockRepository implements Repository {
               college,
               participants: people.length,
               confirmed,
+              paidPeople,
               paid,
               due,
               accommodation: this.d.allotments.filter((a) => ids.has(a.participantId)).length,
@@ -1840,6 +1927,14 @@ export class MockRepository implements Repository {
       const ev = this.d.events.find((e) => e.id === eventId);
       const confirmedCount = regs.filter((r) => r.status === "confirmed").length;
       const pendingCount = regs.filter((r) => r.status === "pending").length;
+      // A "Team 2–10" event's capacity is team slots, not people — a 6-person
+      // team occupies one slot the same as a 2-person one, so a solo event's
+      // headcount and a team event's fill are counted differently.
+      const isTeamEvent = (ev?.maxTeamSize ?? 1) > 1;
+      const live = regs.filter((r) => r.status === "confirmed" || r.status === "pending");
+      const filled = isTeamEvent
+        ? new Set(live.filter((r) => r.teamId).map((r) => r.teamId as string)).size
+        : live.length;
       const ids = new Set(regs.map((r) => r.id));
       const revenue = this.d.payments
         .filter((p) => p.status === "verified" && p.registrationIds.some((r) => ids.has(r)))
@@ -1851,7 +1946,8 @@ export class MockRepository implements Repository {
         waitlistCount: regs.filter((r) => r.status === "waitlisted").length,
         checkedInCount: this.d.attendance.filter((a) => a.eventId === eventId).length,
         capacity: ev?.capacity ?? null,
-        seatsLeft: ev?.capacity != null ? ev.capacity - confirmedCount - pendingCount : null,
+        seatsLeft: ev?.capacity != null ? ev.capacity - filled : null,
+        filled,
         revenue,
       };
     },
@@ -2740,6 +2836,33 @@ export class MockRepository implements Repository {
       this.save("staff", rec);
       this.log("staff.updated", "staff", id, before, patch as Record<string, unknown>);
       return clone(rec);
+    },
+
+    /**
+     * The Registration Head setting someone else's temporary password.
+     *
+     * Mirrors what the backend does on the live path: the member is forced to
+     * rotate it on next sign-in, and their lockout counters are cleared — a
+     * reset that left an account locked would hand over a password that cannot
+     * be used until the lockout drains.
+     */
+    resetPassword: async (id: string, temporaryPassword: string) => {
+      const actor = this.assertCan("staff.manageRoles");
+      const rec = this.d.staff.find((s) => s.id === id);
+      if (!rec) throw new DataError("NOT_FOUND", "Staff member not found");
+      if (rec.id === actor.id)
+        throw new DataError("FORBIDDEN", "Change your own password from the console instead.");
+      const policy = checkPassword(temporaryPassword);
+      if (!policy.ok) throw new DataError("PASSWORD_TOO_WEAK", policy.problems[0]);
+
+      const { hash, salt } = await hashPassword(temporaryPassword);
+      rec.passwordHash = hash;
+      rec.passwordSalt = salt;
+      rec.mustChangePassword = true;
+      rec.failedAttempts = 0;
+      rec.lockedUntil = null;
+      this.save("staff", rec);
+      this.log("staff.password_reset", "staff", id, null, {});
     },
 
     workload: async () =>

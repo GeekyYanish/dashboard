@@ -40,6 +40,8 @@ export const CAPABILITIES = {
   "events.manage": ["head"],
   "staff.manageRoles": ["head"],
   "participants.erase": ["head"],
+  /** Recategorising someone changes what counts toward revenue — admin-only. */
+  "participants.recategorize": ["head"],
 } as const satisfies Record<string, readonly StaffRoleId[]>;
 
 export type Capability = keyof typeof CAPABILITIES;
@@ -63,6 +65,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   "events.manage": "Edit events",
   "staff.manageRoles": "Change staff roles",
   "participants.erase": "Erase personal data",
+  "participants.recategorize": "Change a participant's category",
 };
 
 export const ALL_CAPABILITIES = Object.keys(CAPABILITIES) as Capability[];

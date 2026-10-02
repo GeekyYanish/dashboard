@@ -87,6 +87,14 @@ export interface Participant {
   gender: Gender;
   dateOfBirth: string;
   collegeId: string;
+  /**
+   * Resolved display name for the participant's institution — the real
+   * college's name, or their own typed one when `collegeId` is empty because
+   * their college wasn't in the reference list. Read-only, set by the backend.
+   */
+  collegeName?: string | null;
+  /** Set when they typed their own institution instead of picking `collegeId`. */
+  customCollegeName?: string | null;
   department: string;
   yearOfStudy: number;
   category: CategoryId;
@@ -178,7 +186,7 @@ export interface SubstitutionRequest {
 // Money
 // ---------------------------------------------------------------------------
 
-export type PaymentStatus = "pending" | "verified" | "rejected" | "refunded" | "partial";
+export type PaymentStatus = "pending" | "verified" | "rejected" | "cancelled" | "refunded" | "partial";
 
 export interface FeeLine {
   label: string;
@@ -572,6 +580,14 @@ export interface EventStats {
   capacity: number | null;
   seatsLeft: number | null;
   revenue: number;
+  /**
+   * What actually counts against `capacity` for the fill-rate display.
+   * `confirmedCount + pendingCount` for a solo event; distinct teams with a
+   * live (confirmed/pending) registration for a team event — a "Team 2–10"
+   * event with capacity 20 means 20 team slots, not 20 people, so a 6-person
+   * team occupies one slot the same as a 2-person one.
+   */
+  filled: number;
 }
 
 export interface OverviewStats {
@@ -581,6 +597,8 @@ export interface OverviewStats {
   waitlisted: number;
   cancelled: number;
   participants: number;
+  /** Unique people with a verified payment. One pass covers every event, so this is not the registration count. Null when it cannot be worked out — shown as a dash, never as a fake zero. */
+  paidParticipants: number | null;
   collegesOnboarded: number;
   revenueCollected: number;
   revenueExpected: number;

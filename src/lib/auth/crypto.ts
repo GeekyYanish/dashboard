@@ -107,13 +107,28 @@ const COMMON = [
   "admin123", "gateways", "registration", "changeme", "iloveyou",
 ];
 
-export function checkPassword(pw: string, email?: string): PasswordCheck {
+/**
+ * `requireSymbol` exists for the OTP recovery screen, and only for it.
+ *
+ * That screen posts to the website's `/auth/reset-password`, whose own regex
+ * demands a symbol — a rule participants are held to and this console is not.
+ * Asking for the union of both policies up front is the difference between the
+ * meter refusing a password and the server refusing it after the one-time OTP
+ * has already been spent.
+ */
+export function checkPassword(
+  pw: string,
+  email?: string,
+  options?: { requireSymbol?: boolean },
+): PasswordCheck {
   const problems: string[] = [];
 
   if (pw.length < 10) problems.push("Use at least 10 characters");
   if (!/[a-z]/.test(pw)) problems.push("Add a lowercase letter");
   if (!/[A-Z]/.test(pw)) problems.push("Add an uppercase letter");
   if (!/[0-9]/.test(pw)) problems.push("Add a number");
+  if (options?.requireSymbol && !/[^A-Za-z0-9]/.test(pw))
+    problems.push("Add a symbol, for example ! ? # @");
   if (COMMON.some((c) => pw.toLowerCase().includes(c)))
     problems.push("Avoid common words like “password” or the fest name");
   if (email) {

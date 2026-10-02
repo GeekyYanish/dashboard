@@ -91,6 +91,7 @@ function toParticipant(value: any): Participant {
     gender: value.gender ?? "other",
     dateOfBirth: value.dateOfBirth ?? "",
     collegeId: value.collegeId ?? "—",
+    collegeName: value.collegeName ?? null,
     department: value.department ?? value.departmentId ?? "—",
     yearOfStudy: Number(value.yearOfStudy ?? 0),
     category: value.category ?? "participant",
@@ -140,6 +141,9 @@ export class HttpParticipants implements ParticipantRepo {
       gender: input.gender,
       dateOfBirth: input.dateOfBirth || null,
       collegeId: input.collegeId || null,
+      // Only meaningful when collegeId is empty — the desk typed an
+      // institution that wasn't in the reference list.
+      customCollegeName: input.customCollegeName || null,
       // `department` carries a course id at the desk; the read path returns
       // the course's name in the same field.
       courseId: input.department || null,
@@ -249,8 +253,33 @@ export class HttpPayments implements PaymentRepo {
     return config.tiers ?? [];
   }
   async list(filter: any = {}) {
-    const result = await api.get<any>("/api/v1/admin/payments", { status: filter.status?.[0], participantId: filter.participantId, limit: 200 });
-    return (result.items ?? []).map(toPayment).filter((payment: Payment) => !filter.method || (payment.method != null && filter.method.includes(payment.method)));
+    /* `search` and `flaggedOnly` have no backend equivalent — the admin payments
+       endpoint only understands status, participantId and limit — so both are
+       applied here against the raw rows, before `toPayment` drops the
+       participant fields the search box promises ("Name, UTR, invoice serial or
+       participant code"). Client-side filtering only sees what was fetched, so
+       the page is widened to the backend's own cap while a text or fraud filter
+       is active, trading one bigger request for not silently missing an older
+       match that a 200-row page would have pushed off the end.
+       `status` used to send only the first selected value — the backend accepts
+       a comma-separated list, so picking more than one status quietly dropped
+       every status after the first. */
+    const hasClientFilter = Boolean(filter.search) || Boolean(filter.flaggedOnly);
+    const result = await api.get<any>("/api/v1/admin/payments", {
+      status: filter.status?.join(","),
+      participantId: filter.participantId,
+      limit: hasClientFilter ? 1000 : 200,
+    });
+    let rows: any[] = result.items ?? [];
+    if (filter.flaggedOnly) rows = rows.filter((row) => (row.fraudFlags ?? []).length > 0);
+    const q = typeof filter.search === "string" ? filter.search.trim().toLowerCase() : "";
+    if (q) {
+      rows = rows.filter((row) =>
+        [row.participantName, row.participantEmail, row.participantCode, row.utr, row.invoiceSerial]
+          .some((field) => typeof field === "string" && field.toLowerCase().includes(q)),
+      );
+    }
+    return rows.map(toPayment).filter((payment: Payment) => !filter.method || (payment.method != null && filter.method.includes(payment.method)));
   }
   async get(id: string) { try { const value = await api.get<any>(`/api/v1/admin/payments/${id}`); return value ? toPayment(value) : null; } catch (error) { if (isDataError(error) && error.code === "NOT_FOUND") return null; throw error; } }
   async forParticipant(participantId: string) {
@@ -303,6 +332,7 @@ export class HttpPayments implements PaymentRepo {
     return toPayment(await api.post<any>(`/api/v1/admin/payments/${id}/review`, { decision, reason: note }));
   }
   async bulkReview(ids: string[], decision: "verified" | "rejected", note?: string) { const result = await api.post<{ updated: number }>("/api/v1/admin/payments/bulk-review", { ids, decision, reason: note }); return result.updated; }
+  async cancel(id: string, reason: string) { return toPayment(await api.post<any>(`/api/v1/admin/payments/${id}/cancel`, { reason })); }
   async runFraudSweep() { return this.list(); }
   async outstanding() { return []; }
   async quote() { return []; }
@@ -319,7 +349,7 @@ export class HttpEvents implements EventRepo {
   // accessible catalogue so changing scope does not collapse its options.
   async list() { return (await api.get<any[]>("/api/v1/admin/events")).map(toEvent); }
   async get(id: string) { try { const value = await api.get<any[]>("/api/v1/admin/events", { eventId: id }); return value[0] ? toEvent(value[0]) : null; } catch (error) { throw error; } }
-  async stats(eventId: string): Promise<EventStats> { const value = await api.get<any>("/api/v1/admin/overview", { eventId }); return { eventId, confirmedCount: value.confirmedRegistrations ?? 0, pendingCount: value.pendingRegistrations ?? 0, waitlistCount: value.waitlistedRegistrations ?? 0, checkedInCount: 0, capacity: value.capacity ?? null, seatsLeft: value.capacity == null ? null : Math.max(0, value.capacity - (value.filledSeats ?? 0)), revenue: value.verifiedRevenueInr ?? 0 }; }
+  async stats(eventId: string): Promise<EventStats> { const value = await api.get<any>("/api/v1/admin/overview", { eventId }); const confirmedCount = value.confirmedRegistrations ?? 0; const pendingCount = value.pendingRegistrations ?? 0; return { eventId, confirmedCount, pendingCount, waitlistCount: value.waitlistedRegistrations ?? 0, checkedInCount: 0, capacity: value.capacity ?? null, seatsLeft: value.capacity == null ? null : Math.max(0, value.capacity - (value.filledSeats ?? 0)), filled: value.filledSeats ?? confirmedCount + pendingCount, revenue: value.verifiedRevenueInr ?? 0 }; }
   async allStats() { const events = await this.list(); return Promise.all(events.map((event) => this.stats(event.id))); }
   async update(): Promise<FestEvent> { throw new DataError("FORBIDDEN", "Event edits are not enabled in the live registration core."); }
   async venueClashes() { return []; }
@@ -341,7 +371,7 @@ export class HttpTeams implements TeamRepo {
 
 function emptyOverview(value: any): OverviewStats {
   const expected = (value.totalParticipants ?? 0) * (value.entryPassAmountInr ?? 250);
-  return { totalRegistrations: value.totalRegistrations ?? 0, confirmed: value.confirmedRegistrations ?? 0, pending: value.pendingRegistrations ?? 0, waitlisted: value.waitlistedRegistrations ?? 0, cancelled: value.cancelledRegistrations ?? 0, participants: value.totalParticipants ?? 0, collegesOnboarded: 0, revenueCollected: value.verifiedRevenueInr ?? 0, revenueExpected: expected, outstandingDues: Math.max(0, expected - (value.verifiedRevenueInr ?? 0)), verificationQueueDepth: value.pendingPayments ?? 0, oldestPendingHours: 0, accommodationRequested: 0, accommodationAllotted: 0, accommodationCapacity: 0, checkedInToday: 0, docsPending: 0, openTickets: 0, funnel: [{ stage: "Participants", count: value.totalParticipants ?? 0 }, { stage: "Registrations", count: value.totalRegistrations ?? 0 }, { stage: "Confirmed", count: value.confirmedRegistrations ?? 0 }], series: [], revenueByMethod: [], registrationsByTrack: [], topColleges: [] };
+  return { totalRegistrations: value.totalRegistrations ?? 0, confirmed: value.confirmedRegistrations ?? 0, pending: value.pendingRegistrations ?? 0, waitlisted: value.waitlistedRegistrations ?? 0, cancelled: value.cancelledRegistrations ?? 0, participants: value.totalParticipants ?? 0, paidParticipants: value.paidParticipants ?? null, collegesOnboarded: 0, revenueCollected: value.verifiedRevenueInr ?? 0, revenueExpected: expected, outstandingDues: Math.max(0, expected - (value.verifiedRevenueInr ?? 0)), verificationQueueDepth: value.pendingPayments ?? 0, oldestPendingHours: 0, accommodationRequested: 0, accommodationAllotted: 0, accommodationCapacity: 0, checkedInToday: 0, docsPending: 0, openTickets: 0, funnel: [{ stage: "Participants", count: value.totalParticipants ?? 0 }, { stage: "Registrations", count: value.totalRegistrations ?? 0 }, { stage: "Confirmed", count: value.confirmedRegistrations ?? 0 }], series: [], revenueByMethod: [], registrationsByTrack: [], topColleges: [] };
 }
 
 /**
@@ -387,8 +417,30 @@ export class HttpAudit implements AuditRepo {
 }
 
 export class HttpOverview implements OverviewRepo {
-  async stats() { return emptyOverview(await api.get<any>("/api/v1/admin/overview", scopeQuery())); }
-  async attention(): Promise<AttentionItem[]> { const stats = await this.stats(); return stats.verificationQueueDepth ? [{ id: "pending-payments", kind: "payment_aging", severity: "warning", title: "Payments awaiting review", detail: `${stats.verificationQueueDepth} receipt(s) need ADMIN verification.`, href: "/payments/queue", count: stats.verificationQueueDepth }] : []; }
+  private async overview() { return emptyOverview(await api.get<any>("/api/v1/admin/overview", scopeQuery())); }
+  async stats() {
+    const stats = await this.overview();
+    /* Older backends do not send paidParticipants. Rather than show a zero that
+       looks real, count the distinct people on verified payments from the
+       ledger the console already reads. That list is fest-wide and ADMIN-only,
+       so it is only used when no event is selected, and a full page (which may
+       be truncated) is treated as unknown rather than under-counted. */
+    if (stats.paidParticipants == null && !selectedEventId()) stats.paidParticipants = await this.paidFromLedger();
+    return stats;
+  }
+  private async paidFromLedger(): Promise<number | null> {
+    try {
+      const limit = 1000;
+      const result = await api.get<any>("/api/v1/admin/payments", { status: "verified", limit });
+      const items: any[] = result.items ?? [];
+      if (items.length >= limit) return null;
+      return new Set(items.map((payment) => payment.participantId)).size;
+    } catch (error) {
+      if (isDataError(error) && ["FORBIDDEN", "NOT_AUTHENTICATED"].includes(error.code)) return null;
+      throw error;
+    }
+  }
+  async attention(): Promise<AttentionItem[]> { const stats = await this.overview(); return stats.verificationQueueDepth ? [{ id: "pending-payments", kind: "payment_aging", severity: "warning", title: "Payments awaiting review", detail: `${stats.verificationQueueDepth} receipt(s) need ADMIN verification.`, href: "/payments/queue", count: stats.verificationQueueDepth }] : []; }
   async activity(limit = 20): Promise<AuditEvent[]> { return new HttpAudit().list({ limit }); }
   async announcements(): Promise<Announcement[]> { return []; }
 }
@@ -421,17 +473,36 @@ export class HttpStaff implements StaffRepo {
   async update(id: string, patch: Partial<StaffMember>) {
     if (patch.role) {
       const role = backendStaffRole(patch.role);
-      const eventId = patch.role === "head" ? null : selectedEventId();
-      if (patch.role !== "head" && !eventId) throw new DataError("VALIDATION_FAILED", "Select an event before granting an event-scoped role.");
+      const current = (await this.list()).find((value) => value.id === id)?.assignments ?? [];
+      /* An event-scoped role needs an event. Use the one selected in the scope
+         picker, else the event this person is already assigned to — so moving
+         a coordinator to Desk Volunteer does not demand a scope selection that
+         the roster gives no hint about. */
+      const eventId = patch.role === "head"
+        ? null
+        : selectedEventId() ?? current.find((assignment) => assignment.eventId)?.eventId ?? null;
+      if (patch.role !== "head" && !eventId) throw new DataError("VALIDATION_FAILED", "Pick an event in the event selector at the top, then set this role again.");
       await api.post(`/api/v1/admin/staff/${id}/assignments`, { role, eventId });
+      /* The dropdown shows one role, so choosing it has to replace the old one.
+         Grants are additive on the backend and the row displays the highest
+         role held, which is why picking Desk Volunteer for a coordinator or
+         head appeared to do nothing. The new grant lands first, so the person
+         is never left without access; assignments of the same role (other
+         events) are kept. */
+      for (const assignment of current) {
+        if (assignment.role !== patch.role) await api.delete(`/api/v1/admin/staff/${id}/assignments/${assignment.id}`);
+      }
     }
     return (await this.list()).find((value) => value.id === id)!;
+  }
+  async resetPassword(id: string, temporaryPassword: string) {
+    await api.post(`/api/v1/admin/staff/${id}/password`, { temporaryPassword });
   }
   async create(input: { name: string; email: string; phone: string; temporaryPassword: string; role: StaffRoleId; eventId: string | null }) {
     const role = backendStaffRole(input.role);
     const eventId = input.role === "head" ? null : input.eventId;
     if (input.role !== "head" && !eventId) throw new DataError("VALIDATION_FAILED", "Select an event for an organizer or scanner.");
-    const created = await api.post<{ id: string }>("/api/v1/admin/staff", { name: input.name, email: input.email, phone: input.phone, temporaryPassword: input.temporaryPassword, assignments: [{ role, eventId }] });
+    const created = await api.post<{ id: string; promoted?: boolean }>("/api/v1/admin/staff", { name: input.name, email: input.email, phone: input.phone, temporaryPassword: input.temporaryPassword, assignments: [{ role, eventId }] });
     /* Built from the response rather than re-reading the list. The account
        already exists by this point, so letting a failed follow-up read reject
        this call reported "could not create staff account" for an account that
@@ -452,7 +523,11 @@ export class HttpStaff implements StaffRepo {
       lastLoginAt: null,
       failedAttempts: 0,
       lockedUntil: null,
-    } as StaffMember;
+      // Whether the backend made a row or promoted one someone had already
+      // signed up with. The temporary password applies either way, but only one
+      // of them is news to the administrator.
+      promoted: Boolean(created.promoted),
+    } as StaffMember & { promoted: boolean };
   }
   async grantAssignment(id: string, role: StaffRoleId, eventId: string | null) {
     const backendRole = backendStaffRole(role);
@@ -465,7 +540,17 @@ export class HttpStaff implements StaffRepo {
     await api.delete(`/api/v1/admin/staff/${id}/assignments/${assignmentId}`);
     return (await this.list()).find((value) => value.id === id)!;
   }
-  async workload() { return []; }
+  async workload() {
+    /* Only verifications exist server-side. Check-ins and tickets have no
+       backend record yet, so they stay 0 rather than being invented. */
+    try {
+      const rows = await api.get<{ staffId: string; verifications: number }[]>("/api/v1/admin/staff/workload");
+      return rows.map((row) => ({ staffId: row.staffId, verifications: row.verifications, walkIns: 0, tickets: 0 }));
+    } catch (error) {
+      if (isDataError(error) && ["FORBIDDEN", "NOT_AUTHENTICATED"].includes(error.code)) return [];
+      throw error;
+    }
+  }
 }
 
 export class HttpAdmin implements AdminRepo {
@@ -492,16 +577,17 @@ export class HttpColleges implements CollegeRepo {
   async get(id: string): Promise<College | null> {
     return (await this.list()).find((college) => college.id === id) ?? null;
   }
-  async contingents() {
+  async contingents(eventId?: string) {
     return await api.get<{
       college: College;
       participants: number;
       confirmed: number;
+      paidPeople: number;
       paid: number;
       due: number;
       accommodation: number;
       arrivalAt: string | null;
-    }[]>("/api/v1/admin/colleges/contingents");
+    }[]>("/api/v1/admin/colleges/contingents", { eventId: eventId ?? selectedEventId() });
   }
   async setVerified(id: string, verified: boolean): Promise<College> {
     return await api.patch<College>(`/api/v1/admin/colleges/${id}`, { isVerified: verified });

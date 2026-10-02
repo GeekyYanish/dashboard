@@ -20,7 +20,9 @@ export const REGISTRATION_TONE: Record<string, Tone> = {
 export const REGISTRATION_LABEL: Record<string, string> = {
   draft: "Draft",
   pending: "Pending",
-  confirmed: "Confirmed",
+  // A verified payment is the only approval a registration needs, so a paid
+  // registration reads "Registered". The stored value stays "confirmed".
+  confirmed: "Registered",
   waitlisted: "Waitlisted",
   cancelled: "Cancelled",
   rejected: "Rejected",
@@ -30,6 +32,9 @@ export const PAYMENT_TONE: Record<string, Tone> = {
   pending: "pending",
   verified: "paid",
   rejected: "failed",
+  // Reversed after being verified by the Registration Head — distinct from
+  // "rejected", which never confirmed anything in the first place.
+  cancelled: "neutral",
   refunded: "neutral",
   partial: "waitlist",
 };
@@ -38,6 +43,7 @@ export const PAYMENT_LABEL: Record<string, string> = {
   pending: "Awaiting review",
   verified: "Verified",
   rejected: "Rejected",
+  cancelled: "Cancelled",
   refunded: "Refunded",
   partial: "Partial",
 };

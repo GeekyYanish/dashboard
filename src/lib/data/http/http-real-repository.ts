@@ -110,14 +110,14 @@ function toParticipant(value: any): Participant {
 
 export class HttpParticipants implements ParticipantRepo {
   async list(filter: any = {}) {
-    const rows = await api.get<any[]>("/api/v1/admin/participants", { ...scopeQuery(), search: filter.search, collegeId: filter.collegeId, category: filter.category });
+    const rows = await api.get<any[]>("/api/v1/admin/participants", { ...scopeQuery(), ...(filter.eventId ? { eventId: filter.eventId } : {}), search: filter.search, collegeId: filter.collegeId, category: filter.category });
     return rows.map(toParticipant).filter((participant) => !filter.gender || participant.gender === filter.gender);
   }
   async get(id: string) {
     try { const value = await api.get<any>(`/api/v1/admin/participants/${id}`, scopeQuery()); return value?.participant ? toParticipant(value.participant) : null; } catch (error) { if (isDataError(error) && error.code === "NOT_FOUND") return null; throw error; }
   }
   async getByCode(code: string) { return (await this.list({ search: code })).find((participant) => participant.code.toLowerCase() === code.toLowerCase()) ?? null; }
-  async search(q: string, limit = 50) { return (await this.list({ search: q })).slice(0, limit); }
+  async search(q: string, limit = 50, eventId?: string) { return (await this.list({ search: q, eventId })).slice(0, limit); }
   async flags(id: string): Promise<ParticipantFlags> {
     const participant = await this.get(id);
     // Payment listing is intentionally ADMIN-only. The scoped participant

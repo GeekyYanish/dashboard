@@ -137,7 +137,7 @@ export interface ParticipantRepo {
   get(id: string): Promise<Participant | null>;
   getByCode(code: string): Promise<Participant | null>;
   /** Free-text across name / code / phone / email — powers the desk search. */
-  search(q: string, limit?: number): Promise<Participant[]>;
+  search(q: string, limit?: number, eventId?: string): Promise<Participant[]>;
   flags(id: string): Promise<ParticipantFlags>;
   create(input: Omit<Participant, "id" | "code" | "createdAt" | "isBlocked">): Promise<Participant>;
   update(id: string, patch: Partial<Participant>): Promise<Participant>;

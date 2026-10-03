@@ -44,13 +44,17 @@ export function CheckinScreen() {
   const results = useAsync(
     async () => {
       if (dQuery.trim().length < 2) return [];
-      const res = await getRepo().participants.search(dQuery, 15);
+      const res = await getRepo().participants.search(
+        dQuery, 
+        15, 
+        mode === "event" && eventId ? eventId : undefined
+      );
       if (mode === "event") {
         return res.filter((p) => p.festAttendance).slice(0, 6);
       }
       return res.slice(0, 6);
     },
-    [dQuery, mode],
+    [dQuery, mode, eventId],
   );
   const noShows = useAsync(
     () => (eventId ? getRepo().attendance.noShows(eventId) : Promise.resolve([])),

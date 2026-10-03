@@ -4,6 +4,9 @@ import { cn } from "@/lib/utils";
 import {
   forwardRef,
   useId,
+  useState,
+  useRef,
+  useEffect,
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
@@ -498,5 +501,145 @@ export function NeoSlider({
         />
       </div>
     </div>
+  );
+}
+
+export interface NeoComboboxProps extends FieldWrap {
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (value: string, label: string) => void;
+  placeholder?: string;
+  allowCustom?: boolean;
+}
+
+export function NeoCombobox({
+  label,
+  hint,
+  error,
+  required,
+  className,
+  options,
+  value,
+  onChange,
+  placeholder = "Search...",
+  allowCustom = false,
+}: NeoComboboxProps) {
+  const auto = useId();
+  const selId = auto;
+  const [open, setOpen] = useState(false);
+  
+  // Find the selected option's label to display in the input
+  const selectedOption = options.find((o) => o.value === value);
+  const initialQuery = selectedOption ? selectedOption.label : (allowCustom ? value : "");
+  const [query, setQuery] = useState(initialQuery);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Keep query in sync if value changes externally
+  useEffect(() => {
+    const matched = options.find((o) => o.value === value);
+    if (matched) setQuery(matched.label);
+    else if (!value) setQuery("");
+  }, [value, options]);
+
+  // Click outside listener
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setOpen(false);
+        // If they click away without selecting, revert the text back to the currently selected option.
+        // Wait, if allowCustom is true, maybe they meant to type a custom name.
+        if (allowCustom) {
+          // If there is no exact match in options, just let them keep the typed text
+          // and we should fire onChange with that typed text as the value (which acts as custom).
+          // Actually, if we update value on every keystroke in allowCustom mode, it's easier.
+        } else {
+          // Revert to selected option label
+          const matched = options.find((o) => o.value === value);
+          if (matched) setQuery(matched.label);
+          else setQuery("");
+        }
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [value, options, allowCustom]);
+
+  const filtered = options.filter((o) =>
+    o.label.toLowerCase().includes(query.toLowerCase())
+  );
+  
+  // Exact match check
+  const hasExactMatch = options.some((o) => o.label.toLowerCase() === query.toLowerCase());
+  const showCustomOption = allowCustom && query.trim() !== "" && !hasExactMatch;
+
+  return (
+    <Field
+      id={selId}
+      label={label}
+      hint={hint}
+      error={error}
+      required={required}
+      className={className}
+    >
+      <div className="relative" ref={wrapperRef}>
+        <input
+          id={selId}
+          type="text"
+          className={cn(WELL, "h-10 pr-9 w-full")}
+          placeholder={placeholder}
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+            if (allowCustom) {
+              onChange(e.target.value, e.target.value);
+            } else if (e.target.value === "") {
+              onChange("", "");
+            }
+          }}
+        />
+        <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink-faint">
+          <ChevronDown className="size-4" />
+        </div>
+
+        {open && (filtered.length > 0 || showCustomOption) && (
+          <div className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-neo-lg border border-engrave bg-plane-alt p-1 shadow-[2px_4px_12px_var(--neo-shadow)]">
+            {filtered.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={cn(
+                  "flex w-full items-center justify-between rounded-neo-sm px-3 py-2 text-left text-[0.85rem] transition-colors",
+                  value === opt.value
+                    ? "bg-ink text-plane"
+                    : "text-ink hover:bg-plane"
+                )}
+                onClick={() => {
+                  setQuery(opt.label);
+                  onChange(opt.value, opt.label);
+                  setOpen(false);
+                }}
+              >
+                <span className="truncate">{opt.label}</span>
+                {value === opt.value && <Check className="ml-2 size-3.5 shrink-0" />}
+              </button>
+            ))}
+            {showCustomOption && (
+              <button
+                type="button"
+                className="flex w-full items-center rounded-neo-sm px-3 py-2 text-left text-[0.85rem] text-signal transition-colors hover:bg-plane"
+                onClick={() => {
+                  onChange(query, query);
+                  setOpen(false);
+                }}
+              >
+                <span className="truncate">Add "{query}"</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </Field>
   );
 }

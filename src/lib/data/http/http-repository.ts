@@ -1,6 +1,6 @@
 import type { Repository } from "../repository";
 import { MockRepository } from "../local/mock-repository";
-import { HttpAdmin, HttpAudit, HttpAuth, HttpEvents, HttpOverview, HttpParticipants, HttpPayments, HttpRegistrations, HttpStaff, HttpTeams, HttpColleges } from "./http-real-repository";
+import { HttpAdmin, HttpAudit, HttpAuth, HttpEvents, HttpOverview, HttpParticipants, HttpPayments, HttpRegistrations, HttpStaff, HttpTeams, HttpColleges, HttpAttendance } from "./http-real-repository";
 
 /**
  * Live console composition. Core registration data always comes from the
@@ -20,6 +20,7 @@ export function createHttpRepository(): Repository {
     teams: new HttpTeams(),
     staff: new HttpStaff(),
     admin: new HttpAdmin(),
+    attendance: new HttpAttendance(),
     // Without this the /audit screen silently reads the localStorage demo store
     // even in live mode — real backend audit rows were never reaching the UI.
     colleges: new HttpColleges(),

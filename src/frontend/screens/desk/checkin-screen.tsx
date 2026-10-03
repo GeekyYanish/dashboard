@@ -2,13 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { ScanLine, Check, UserX, ArrowUpFromLine, Download } from "lucide-react";
-import { Page, PageHeader, StatGrid } from "@/frontend/components/page";
+import { Page, PageHeader } from "@/frontend/components/page";
 import {
   NeoCard,
   NeoButton,
   NeoSearchField,
   NeoSelect,
-  NeoStatTile,
   StatusBadge,
   NeoAvatar,
   DataTable,
@@ -18,7 +17,6 @@ import {
   toast,
   type Column,
 } from "@/frontend/components/neo";
-import { BarChart } from "@/frontend/components/charts";
 import { useAsync, useDebounced } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
@@ -44,8 +42,19 @@ export function CheckinScreen() {
 
   const attendance = useAsync(() => getRepo().attendance.list(), []);
   const results = useAsync(
-    () => (dQuery.trim().length >= 2 ? getRepo().participants.search(dQuery, 6) : Promise.resolve([])),
-    [dQuery],
+    async () => {
+      if (dQuery.trim().length < 2) return [];
+      const res = await getRepo().participants.search(
+        dQuery, 
+        15, 
+        mode === "event" && eventId ? eventId : undefined
+      );
+      if (mode === "event") {
+        return res.filter((p) => p.festAttendance).slice(0, 6);
+      }
+      return res.slice(0, 6);
+    },
+    [dQuery, mode, eventId],
   );
   const noShows = useAsync(
     () => (eventId ? getRepo().attendance.noShows(eventId) : Promise.resolve([])),
@@ -56,15 +65,6 @@ export function CheckinScreen() {
     [eventId],
   );
 
-  const byDay = useMemo(
-    () =>
-      FEST.days.map((d) => ({
-        label: d.label,
-        value: (attendance.data ?? []).filter((a) => a.day === d.key).length,
-        slot: 0,
-      })),
-    [attendance.data],
-  );
 
   const todayCount = (attendance.data ?? []).length;
   const uniquePeople = new Set((attendance.data ?? []).map((a) => a.participantId)).size;
@@ -160,45 +160,53 @@ export function CheckinScreen() {
         title="Check-in"
         description="Venue gate and per-event attendance. Scanning the same badge twice is a no-op by design — the second scan reports it rather than double-counting."
         actions={
-          <NeoButton
-            size="sm"
-            variant="secondary"
-            icon={<Download />}
-            onClick={() =>
-              downloadCsv("attendance.csv", [
-                ["Participant", "Code", "College", "Event", "Day", "Method", "Checked in"],
-                ...(attendance.data ?? []).map((a) => {
-                  const p = lookups.participant(a.participantId);
-                  return [
-                    p?.fullName ?? "", p?.code ?? "",
-                    lookups.college(p?.collegeId ?? "")?.name ?? "",
-                    a.eventId ? (lookups.event(a.eventId)?.title ?? "") : "Venue gate",
-                    a.day, a.method, a.checkedInAt,
-                  ];
-                }),
-              ])
-            }
-          >
-            Export attendance
-          </NeoButton>
+          <div className="flex items-center gap-6">
+            <div className="flex gap-4 text-[0.85rem] font-medium text-ink bg-plane-alt px-4 py-1.5 rounded-full border border-hairline">
+              <div className="flex items-center gap-1.5">
+                <span className="text-ink-muted">Total check-ins:</span>
+                <span>{todayCount.toLocaleString("en-IN")}</span>
+              </div>
+              <div className="w-px bg-hairline" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-ink-muted">Unique people:</span>
+                <span>{uniquePeople.toLocaleString("en-IN")}</span>
+              </div>
+              {mode === "noshow" && (
+                <>
+                  <div className="w-px bg-hairline" />
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-ink-muted">No-shows:</span>
+                    <span className={eventId ? "text-danger" : ""}>
+                      {eventId ? (noShows.data?.length ?? 0).toLocaleString("en-IN") : "Select event"}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+            <NeoButton
+              size="sm"
+              variant="secondary"
+              icon={<Download />}
+              onClick={() =>
+                downloadCsv("attendance.csv", [
+                  ["Participant", "Code", "College", "Event", "Day", "Method", "Checked in"],
+                  ...(attendance.data ?? []).map((a) => {
+                    const p = lookups.participant(a.participantId);
+                    return [
+                      p?.fullName ?? "", p?.code ?? "",
+                      lookups.college(p?.collegeId ?? "")?.name ?? "",
+                      a.eventId ? (lookups.event(a.eventId)?.title ?? "") : "Venue gate",
+                      a.day, a.method, a.checkedInAt,
+                    ];
+                  }),
+                ])
+              }
+            >
+              Export attendance
+            </NeoButton>
+          </div>
         }
       />
-
-      <StatGrid cols={4}>
-        <NeoStatTile label="Total check-ins" value={todayCount.toLocaleString("en-IN")} icon={<ScanLine />} />
-        <NeoStatTile label="Unique people" value={uniquePeople.toLocaleString("en-IN")} icon={<Check />} />
-        <NeoStatTile
-          label="No-shows"
-          value={(noShows.data?.length ?? 0).toLocaleString("en-IN")}
-          icon={<UserX />}
-          deltaLabel={eventId ? "For the selected event" : "Pick an event"}
-        />
-        <NeoStatTile
-          label="Fest days"
-          value={FEST.days.length}
-          deltaLabel={FEST.days.map((d) => d.label).join(" · ")}
-        />
-      </StatGrid>
 
       <NeoSegmented
         value={mode}
@@ -256,7 +264,16 @@ export function CheckinScreen() {
                         {p.code} · {lookups.college(p.collegeId)?.shortName}
                       </span>
                     </span>
-                    <Check className="size-5 shrink-0 text-paid" />
+                    {(() => {
+                      const isCheckedIn = (attendance.data ?? []).some(
+                        (a) => a.participantId === p.id && (mode === "event" ? a.eventId === eventId : !a.eventId)
+                      );
+                      return isCheckedIn ? (
+                        <Check className="size-5 shrink-0 text-paid" />
+                      ) : (
+                        <div className="size-5 shrink-0 rounded-full border-2 border-hairline" />
+                      );
+                    })()}
                   </button>
                 ))}
               </div>
@@ -273,8 +290,8 @@ export function CheckinScreen() {
             </NeoCard.Raw>
           </NeoCard>
 
-          <div className="space-y-4">
-            <NeoCard>
+          <div className="flex flex-col">
+            <NeoCard className="flex-1">
               <NeoCard.Header eyebrow="Just now" title="Recent check-ins" />
               <NeoCard.Body flush>
                 {recent.length === 0 ? (
@@ -298,13 +315,6 @@ export function CheckinScreen() {
                   </ul>
                 )}
               </NeoCard.Body>
-            </NeoCard>
-
-            <NeoCard>
-              <NeoCard.Header eyebrow="By day" title="Attendance" />
-              <NeoCard.Raw>
-                <BarChart data={byDay} height={160} />
-              </NeoCard.Raw>
             </NeoCard>
           </div>
         </div>

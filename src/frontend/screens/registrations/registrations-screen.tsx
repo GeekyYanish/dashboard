@@ -41,6 +41,18 @@ import { useAuth } from "@/frontend/hooks/use-auth";
 
 const STATUSES = ["pending", "confirmed", "waitlisted", "cancelled", "rejected"] as const;
 
+function resolveEventTrack(eventId: string, lookups: any): string {
+  const ev = lookups.event(eventId);
+  if (ev?.track) return ev.track;
+  const id = (eventId || "").toLowerCase();
+  if (id.includes("design") || id.includes("art")) return "design";
+  if (id.includes("game") || id.includes("gaming") || id.includes("esport")) return "gaming";
+  if (id.includes("quiz") || id.includes("literary") || id.includes("debate") || id.includes("paper")) return "literary";
+  if (id.includes("dance") || id.includes("music") || id.includes("cultural") || id.includes("twin") || id.includes("quest")) return "cultural";
+  if (id.includes("sport")) return "sports";
+  return "technical";
+}
+
 export interface UserRegistrationRow {
   id: string;
   participantId: string;
@@ -156,13 +168,14 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
 
       const events = eventRegs.map((r) => {
         const ev = lookups.event(r.eventId);
-        const tr = ev?.track ? TRACKS.find((t) => t.id === ev.track) : undefined;
+        const trackId = ev?.track || resolveEventTrack(r.eventId, lookups);
+        const tr = TRACKS.find((t) => t.id === trackId);
         return {
           id: r.id,
           code: r.code,
           eventId: r.eventId,
           eventTitle: ev?.title ?? r.eventTitle ?? r.eventId,
-          track: tr?.label ?? ev?.track,
+          track: tr?.label ?? trackId,
           trackShort: tr?.short,
           teamId: r.teamId,
           status: r.status,
@@ -210,6 +223,29 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
 
   const paidUsersCount = userAggregatedRows.length;
 
+  /** Filtered rows for non-user mode (All registrations) since backend lacks some filters */
+  const displayRows = useMemo(() => {
+    if (isUserMode) return [];
+    let list = rows.data ?? [];
+
+    if (facetState.track?.length) {
+      list = list.filter((r) => {
+        const track = resolveEventTrack(r.eventId, lookups);
+        return facetState.track.includes(track);
+      });
+    }
+
+    if (facetState.category?.length) {
+      list = list.filter((r) => {
+        const p = lookups.participant(r.participantId);
+        const cat = p?.category || "participant";
+        return facetState.category.includes(cat);
+      });
+    }
+
+    return list;
+  }, [isUserMode, rows.data, facetState, lookups]);
+
   /** Filtered and searched rows when User mode is active */
   const userDisplayRows = useMemo(() => {
     if (!isUserMode) return [];
@@ -232,15 +268,23 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
     }
 
     if (facetState.track?.length) {
-      list = list.filter((u) =>
-        u.events.some((e) => facetState.track.includes(lookups.event(e.eventId)?.track ?? "")),
-      );
+      list = list
+        .filter((u) =>
+          u.events.some((e) => facetState.track.includes(resolveEventTrack(e.eventId, lookups))),
+        )
+        .map((u) => ({
+          ...u,
+          events: u.events.filter((e) =>
+            facetState.track.includes(resolveEventTrack(e.eventId, lookups)),
+          ),
+        }));
     }
 
     if (facetState.category?.length) {
       list = list.filter((u) => {
         const p = lookups.participant(u.participantId);
-        return p && facetState.category.includes(p.category);
+        const cat = p?.category || "participant";
+        return facetState.category.includes(cat);
       });
     }
 
@@ -602,7 +646,7 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
       return;
     }
 
-    const data = rows.data ?? [];
+    const data = displayRows;
     const teamName = new Map<string, string>();
     try {
       for (const t of await getRepo().teams.list()) teamName.set(t.id, t.name);
@@ -722,7 +766,7 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
           });
           toast.info(`Applied view “${v.name}”`);
         }}
-        resultCount={isUserMode ? userDisplayRows.length : rows.data?.length}
+        resultCount={isUserMode ? userDisplayRows.length : displayRows.length}
         totalCount={isUserMode ? paidUsersCount : all.data?.length}
       />
 
@@ -748,7 +792,7 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
             />
           ) : (
             <DataTable
-              rows={rows.data ?? []}
+              rows={displayRows}
               columns={columns}
               rowKey={(r) => r.id}
               loading={rows.loading || lookups.loading}

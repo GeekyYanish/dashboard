@@ -42,8 +42,15 @@ export function CheckinScreen() {
 
   const attendance = useAsync(() => getRepo().attendance.list(), []);
   const results = useAsync(
-    () => (dQuery.trim().length >= 2 ? getRepo().participants.search(dQuery, 6) : Promise.resolve([])),
-    [dQuery],
+    async () => {
+      if (dQuery.trim().length < 2) return [];
+      const res = await getRepo().participants.search(dQuery, 15);
+      if (mode === "event") {
+        return res.filter((p) => p.festAttendance).slice(0, 6);
+      }
+      return res.slice(0, 6);
+    },
+    [dQuery, mode],
   );
   const noShows = useAsync(
     () => (eventId ? getRepo().attendance.noShows(eventId) : Promise.resolve([])),
@@ -253,7 +260,16 @@ export function CheckinScreen() {
                         {p.code} · {lookups.college(p.collegeId)?.shortName}
                       </span>
                     </span>
-                    <Check className="size-5 shrink-0 text-paid" />
+                    {(() => {
+                      const isCheckedIn = (attendance.data ?? []).some(
+                        (a) => a.participantId === p.id && (mode === "event" ? a.eventId === eventId : !a.eventId)
+                      );
+                      return isCheckedIn ? (
+                        <Check className="size-5 shrink-0 text-paid" />
+                      ) : (
+                        <div className="size-5 shrink-0 rounded-full border-2 border-hairline" />
+                      );
+                    })()}
                   </button>
                 ))}
               </div>

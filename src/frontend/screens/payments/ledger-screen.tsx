@@ -60,14 +60,32 @@ export function LedgerScreen() {
       categoryCountsTowardRevenue(lookups.participant(p.participantId)?.category ?? "participant");
     const verified = data.filter((p) => p.status === "verified" && countsTowardRevenue(p));
     const pending = data.filter((p) => p.status === "pending" && countsTowardRevenue(p));
-    return {
+    const fromPage = {
       collected: verified.reduce((s, p) => s + p.amount, 0),
+      verifiedCount: verified.length,
       pendingValue: pending.reduce((s, p) => s + p.amount, 0),
       pendingCount: pending.length,
       flagged: data.filter((p) => p.fraudFlags.length > 0).length,
-      avgTicket: verified.length ? verified.reduce((s, p) => s + p.amount, 0) / verified.length : 0,
     };
-  }, [all.data, lookups]);
+
+    /* The list above is one page (the API caps it at 200 rows), so once there
+       are more payments than that, every figure summed from it silently leaves
+       out the oldest ones. The backend totals cover every payment; use them
+       whenever it sends them and fall back to the page only for a backend that
+       does not. All-or-nothing, so the cards never mix the two sources. */
+    const s = stats.data;
+    const server = s && s.verifiedPayments != null && s.pendingRevenue != null && s.flaggedPayments != null ? s : null;
+    const t = server
+      ? {
+          collected: server.revenueCollected,
+          verifiedCount: server.verifiedPayments as number,
+          pendingValue: server.pendingRevenue as number,
+          pendingCount: server.verificationQueueDepth,
+          flagged: server.flaggedPayments as number,
+        }
+      : fromPage;
+    return { ...t, avgTicket: t.verifiedCount ? t.collected / t.verifiedCount : 0 };
+  }, [all.data, stats.data, lookups]);
 
   const facets: Facet[] = [
     {
@@ -254,7 +272,7 @@ export function LedgerScreen() {
           label="Collected"
           value={inr(totals.collected, { compact: true })}
           icon={<Wallet />}
-          deltaLabel={`${(all.data ?? []).filter((p) => p.status === "verified").length} verified payments`}
+          deltaLabel={`${totals.verifiedCount.toLocaleString("en-IN")} verified payments`}
           spark={
             s ? <Sparkline values={s.series.map((d) => d.revenue)} color="var(--viz-3)" /> : undefined
           }

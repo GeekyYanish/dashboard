@@ -23,6 +23,7 @@ import { relativeTime } from "@/lib/utils";
 
 const LINKS = [
   { href: "/registrations", label: "All" },
+  { href: "/registrations/users", label: "User" },
   { href: "/registrations/waitlist", label: "Waitlist" },
   { href: "/registrations/duplicates", label: "Duplicates" },
   { href: "/registrations/clashes", label: "Clashes" },

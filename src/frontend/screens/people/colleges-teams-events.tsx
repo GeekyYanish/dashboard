@@ -41,12 +41,27 @@ import { getRepo } from "@/lib/data";
 import { isDataError, type FestEvent, type Team } from "@/lib/data/types";
 import { TRACKS, inr } from "@/lib/fest.config";
 import { EVENT_TONE, titleCase } from "@/frontend/status";
-import { downloadCsv, relativeTime } from "@/lib/utils";
+import { downloadCsv, downloadExcel, relativeTime } from "@/lib/utils";
 
 /* ==========================================================================
    Colleges — the contingent view. A national fest is negotiated with
    institutions, not individuals, so this is the level the team actually works.
    ========================================================================== */
+
+interface ContingentLike {
+  college: { isVerified: boolean };
+  paid?: number;
+  paidPeople?: number;
+  confirmed?: number;
+}
+
+export function isCollegePaid(c: ContingentLike): boolean {
+  return (c.paidPeople ?? 0) > 0 || (c.paid ?? 0) > 0;
+}
+
+export function isCollegeVerified(c: ContingentLike): boolean {
+  return c.college.isVerified || isCollegePaid(c);
+}
 
 export function CollegesScreen() {
   const contingents = useAsync(() => getRepo().colleges.contingents(), []);
@@ -58,11 +73,11 @@ export function CollegesScreen() {
   const rows = useMemo(() => {
     let d = contingents.data ?? [];
     const verification = facetState.verification?.[0];
-    if (verification === "verified") d = d.filter((c) => c.college.isVerified);
-    else if (verification === "unverified") d = d.filter((c) => !c.college.isVerified);
+    if (verification === "verified") d = d.filter(isCollegeVerified);
+    else if (verification === "unverified") d = d.filter((c) => !isCollegeVerified(c));
     const payment = facetState.payment?.[0];
-    if (payment === "confirmed") d = d.filter((c) => c.paidPeople > 0);
-    else if (payment === "awaiting") d = d.filter((c) => c.paidPeople === 0);
+    if (payment === "confirmed") d = d.filter(isCollegePaid);
+    else if (payment === "awaiting") d = d.filter((c) => !isCollegePaid(c));
     if (!dSearch) return d;
     const q = dSearch.toLowerCase();
     return d.filter(
@@ -75,20 +90,19 @@ export function CollegesScreen() {
 
   const totals = useMemo(() => {
     const d = contingents.data ?? [];
-    const unverified = d.filter((c) => !c.college.isVerified).length;
-    // "Confirmed" here means real money in, not just a name on a list — at
-    // least one person from that college has a verified payment. A college
-    // with a dozen profiles and zero paid people is still just names.
-    const confirmedColleges = d.filter((c) => c.paidPeople > 0).length;
+    const verified = d.filter(isCollegeVerified).length;
+    const unverified = d.length - verified;
+    const confirmedColleges = d.filter(isCollegePaid).length;
+    const awaitingPayment = d.length - confirmedColleges;
     return {
       colleges: d.length,
       people: d.reduce((s, c) => s + c.participants, 0),
       paid: d.reduce((s, c) => s + c.paid, 0),
       due: d.reduce((s, c) => s + c.due, 0),
-      verified: d.length - unverified,
+      verified,
       unverified,
       confirmedColleges,
-      awaitingPayment: d.length - confirmedColleges,
+      awaitingPayment,
     };
   }, [contingents.data]);
 
@@ -103,7 +117,7 @@ export function CollegesScreen() {
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="truncate font-medium text-ink">{r.college.shortName}</span>
-            {r.college.isVerified ? (
+            {isCollegeVerified(r) ? (
               <BadgeCheck className="size-3.5 shrink-0 text-paid" aria-label="Verified" />
             ) : null}
           </div>
@@ -222,8 +236,8 @@ export function CollegesScreen() {
                 ["College", "Short", "City", "State", "Verified", "Participants", "Confirmed", "Paid people", "Paid", "Due", "Beds", "Lead", "Lead phone", "Faculty escort"],
                 ...rows.map((r) => [
                   r.college.name, r.college.shortName, r.college.city, r.college.state,
-                  r.college.isVerified ? "yes" : "no", r.participants, r.confirmed,
-                  r.paidPeople, r.paid, r.due, r.accommodation, r.college.contactName,
+                  isCollegeVerified(r) ? "yes" : "no", r.participants, r.confirmed,
+                  r.paidPeople ?? (isCollegePaid(r) ? 1 : 0), r.paid, r.due, r.accommodation, r.college.contactName,
                   r.college.contactPhone, r.college.facultyEscortName ?? "",
                 ]),
               ])
@@ -242,13 +256,13 @@ export function CollegesScreen() {
           label="Verified colleges"
           value={totals.verified}
           icon={<BadgeCheck />}
-          deltaLabel="Nomination letter checked"
+          deltaLabel="Paid or nomination letter checked"
         />
         <NeoStatTile
           label="Unverified institutions"
           value={totals.unverified}
           icon={<AlertTriangle />}
-          deltaLabel="Nomination letter not checked"
+          deltaLabel="Unpaid and letter not checked"
         />
         <NeoStatTile
           label="Confirmed colleges"
@@ -402,8 +416,113 @@ export function TeamsScreen() {
   const teams = useAsync(() => getRepo().teams.list(), []);
   const incomplete = useAsync(() => getRepo().teams.incomplete(), []);
   const subs = useAsync(() => getRepo().teams.substitutions(), []);
+  const registrations = useAsync(() => getRepo().registrations.list(), []);
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+
+  /** Build a participant → registration-status + payment-status index once. */
+  const regIndex = useMemo(() => {
+    const map = new Map<string, { eventId: string; status: string; paymentStatus: string }[]>();
+    for (const r of registrations.data ?? []) {
+      const key = r.participantId;
+      const list = map.get(key) ?? [];
+      list.push({ eventId: r.eventId, status: r.status, paymentStatus: r.paymentStatus ?? "—" });
+      map.set(key, list);
+    }
+    return map;
+  }, [registrations.data]);
+
+  const handleExportExcel = () => {
+    const allTeams = teams.data ?? [];
+    if (allTeams.length === 0) {
+      toast.info("Nothing to export", "No teams loaded yet.");
+      return;
+    }
+
+    const header = [
+      "Team Name",
+      "Join Code",
+      "Event Name",
+      "Team Leader Name",
+      "Team Leader Email",
+      "Team Leader Phone",
+      "Team Leader College",
+      "Team Size",
+      "Min Team Size",
+      "Max Team Size",
+      "Roster Status",
+      "Member Names",
+      "Member Emails",
+      "Member Phones",
+      "Member Colleges",
+      "Member Registration Statuses",
+      "Member Payment Statuses",
+      "Created At",
+    ];
+
+    const rows: (string | number | null)[][] = [header];
+
+    for (const team of allTeams) {
+      const event = lookups.event(team.eventId);
+      const leader = lookups.participant(team.leaderParticipantId);
+      const leaderCollege = leader ? lookups.college(leader.collegeId) : undefined;
+
+      // Collect member details (excluding the leader row from the list if desired)
+      const memberNames: string[] = [];
+      const memberEmails: string[] = [];
+      const memberPhones: string[] = [];
+      const memberColleges: string[] = [];
+      const memberRegStatuses: string[] = [];
+      const memberPayStatuses: string[] = [];
+
+      for (const mid of team.memberIds) {
+        const p = lookups.participant(mid);
+        const college = p ? lookups.college(p.collegeId) : undefined;
+        memberNames.push(p?.fullName ?? "Unknown");
+        memberEmails.push(p?.email ?? "—");
+        memberPhones.push(p?.phone ?? "—");
+        memberColleges.push(college?.shortName ?? college?.name ?? p?.collegeName ?? p?.customCollegeName ?? "—");
+
+        // Find this participant's registration for this specific event
+        const regs = regIndex.get(mid) ?? [];
+        const eventReg = regs.find((r) => r.eventId === team.eventId);
+        memberRegStatuses.push(eventReg?.status ?? "—");
+        memberPayStatuses.push(eventReg?.paymentStatus ?? "—");
+      }
+
+      rows.push([
+        team.name,
+        team.joinCode,
+        event?.title ?? team.eventId,
+        leader?.fullName ?? "Unknown",
+        leader?.email ?? "—",
+        leader?.phone ?? "—",
+        leaderCollege?.shortName ?? leaderCollege?.name ?? leader?.collegeName ?? leader?.customCollegeName ?? "—",
+        team.memberIds.length,
+        event?.minTeamSize ?? "—",
+        event?.maxTeamSize ?? "—",
+        team.isLocked ? "Locked" : "Open",
+        memberNames.join(", "),
+        memberEmails.join(", "),
+        memberPhones.join(", "),
+        memberColleges.join(", "),
+        memberRegStatuses.join(", "),
+        memberPayStatuses.join(", "),
+        team.createdAt
+          ? new Date(team.createdAt).toLocaleString("en-IN", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "—",
+      ]);
+    }
+
+    downloadExcel("teams_export.xlsx", rows);
+    toast.success("Export ready", `${allTeams.length} teams exported to Excel.`);
+  };
 
   const columns: Column<Team>[] = [
     {
@@ -469,6 +588,17 @@ export function TeamsScreen() {
       <PageHeader
         title="Teams"
         description="Rosters, join codes and substitutions. A team below its event's minimum size cannot compete — those are surfaced first."
+        actions={
+          <NeoButton
+            size="sm"
+            variant="secondary"
+            icon={<Download />}
+            disabled={teams.loading || lookups.loading || registrations.loading}
+            onClick={handleExportExcel}
+          >
+            Export Excel
+          </NeoButton>
+        }
       />
 
       <StatGrid cols={3}>

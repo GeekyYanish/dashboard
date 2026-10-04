@@ -603,6 +603,15 @@ export interface OverviewStats {
   paidParticipants: number | null;
   collegesOnboarded: number;
   revenueCollected: number;
+  /**
+   * Ledger totals computed over every payment by the backend. The payment list
+   * is paged (200 rows), so summing it in the browser under-counts as soon as
+   * there are more payments than a page. Null/absent when the backend does not
+   * send them (older API, mock data) — the ledger then falls back to the page.
+   */
+  verifiedPayments?: number | null;
+  pendingRevenue?: number | null;
+  flaggedPayments?: number | null;
   revenueExpected: number;
   outstandingDues: number;
   verificationQueueDepth: number;

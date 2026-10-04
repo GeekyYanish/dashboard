@@ -148,13 +148,36 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
     return m;
   }, [payments.data, all.data]);
 
+  /** Filtered rows for non-user mode (All registrations) since backend lacks some filters */
+  const displayRows = useMemo(() => {
+    if (isUserMode) return [];
+    let list = rows.data ?? [];
+
+    if (facetState.track?.length) {
+      list = list.filter((r) => {
+        const track = resolveEventTrack(r.eventId, lookups);
+        return facetState.track.includes(track);
+      });
+    }
+
+    if (facetState.category?.length) {
+      list = list.filter((r) => {
+        const p = lookups.participant(r.participantId);
+        const cat = p?.category || "participant";
+        return facetState.category.includes(cat);
+      });
+    }
+
+    return list;
+  }, [isUserMode, rows.data, facetState, lookups]);
+
   /**
    * Grouped, a person who registered for several events is a single row (the
    * latest registration stands in for them) carrying all of their registrations.
    * Ungrouped, every row is just its own registration.
    */
   const tableRows: Row[] = useMemo(() => {
-    const data = rows.data ?? [];
+    const data = displayRows;
     if (!groupByPerson) return data.map((r) => ({ ...r, group: [r] }));
     const byPerson = new Map<string, Registration[]>();
     for (const r of data) byPerson.set(r.participantId, [...(byPerson.get(r.participantId) ?? []), r]);
@@ -162,7 +185,7 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
       const latest = group.reduce((a, b) => (b.registeredAt > a.registeredAt ? b : a));
       return { ...latest, group };
     });
-  }, [rows.data, groupByPerson]);
+  }, [displayRows, groupByPerson]);
 
   /** Selection is by row; a grouped row stands for all of that person's registrations. */
   const selectedIds = useMemo(
@@ -259,29 +282,6 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
   }, [all.data, payByReg, payments.data, lookups]);
 
   const paidUsersCount = userAggregatedRows.length;
-
-  /** Filtered rows for non-user mode (All registrations) since backend lacks some filters */
-  const displayRows = useMemo(() => {
-    if (isUserMode) return [];
-    let list = rows.data ?? [];
-
-    if (facetState.track?.length) {
-      list = list.filter((r) => {
-        const track = resolveEventTrack(r.eventId, lookups);
-        return facetState.track.includes(track);
-      });
-    }
-
-    if (facetState.category?.length) {
-      list = list.filter((r) => {
-        const p = lookups.participant(r.participantId);
-        const cat = p?.category || "participant";
-        return facetState.category.includes(cat);
-      });
-    }
-
-    return list;
-  }, [isUserMode, rows.data, facetState, lookups]);
 
   /** Filtered and searched rows when User mode is active */
   const userDisplayRows = useMemo(() => {
@@ -904,7 +904,7 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
             />
           ) : (
             <DataTable
-              rows={displayRows}
+              rows={tableRows}
               columns={columns}
               rowKey={(r) => r.id}
               loading={rows.loading || lookups.loading}

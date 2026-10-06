@@ -83,7 +83,7 @@ export function QueueScreen() {
         /* Naming the address makes the outcome checkable: the reviewer can see
            that the participant was told, and which address it went to, without
            opening the audit log. */
-        const notified = lookups.participant(current.participantId)?.email;
+        const notified = lookups.participant(current.participantId)?.email ?? current.participantEmail;
         const detail =
           decision === "verified" && res.invoiceSerial
             ? `Invoice ${res.invoiceSerial} issued; registrations confirmed.`
@@ -226,10 +226,10 @@ export function QueueScreen() {
                           i === cursor ? "bg-signal-soft/60" : "hover:bg-plane-alt",
                         )}
                       >
-                        <NeoAvatar name={who?.fullName ?? "?"} size={28} />
+                        <NeoAvatar name={who?.fullName ?? p.participantName ?? "?"} size={28} />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[0.82rem] font-medium text-ink">
-                            {who?.fullName ?? "Unknown"}
+                            {who?.fullName ?? p.participantName ?? "Unknown"}
                           </span>
                           <span className="tnum block truncate text-[0.72rem] text-ink-muted">
                             {inr(p.amount)} · {p.method ? titleCase(p.method) : "Not recorded"}
@@ -474,8 +474,8 @@ function ReviewPane({
     <NeoCard>
       <NeoCard.Header
         eyebrow={`${index + 1} of ${total}`}
-        title={who?.fullName ?? "Unknown participant"}
-        subtitle={`${who?.code ?? ""} · ${college?.name ?? ""}`}
+        title={who?.fullName ?? payment.participantName ?? "Unknown participant"}
+        subtitle={`${who?.code ?? payment.participantCode ?? ""} · ${college?.name ?? ""}`}
         actions={
           <div className="flex items-center gap-1">
             <NeoButton size="sm" variant="ghost" onClick={onPrev} icon={<ChevronUp />}>

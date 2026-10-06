@@ -66,7 +66,7 @@ export function PaymentDrawer({
         open={!!paymentId}
         onOpenChange={(v) => !v && onClose()}
         eyebrow={p ? `${p.method ? titleCase(p.method) : "Not recorded"} · ${relativeTime(p.submittedAt)}` : undefined}
-        title={who?.fullName ?? "Payment"}
+        title={who?.fullName ?? p?.participantName ?? "Payment"}
         footer={
           p ? (
             <>
@@ -160,7 +160,7 @@ export function PaymentDrawer({
                 <KeyValue label="Payment ID" value={p.id} mono />
                 {p.invoiceSerial ? <KeyValue label="Invoice" value={p.invoiceSerial} mono /> : null}
                 {p.utr ? <KeyValue label="UTR" value={p.utr} mono /> : null}
-                <KeyValue label="Participant" value={who?.fullName ?? "—"} />
+                <KeyValue label="Participant" value={who?.fullName ?? p.participantName ?? "—"} />
                 <KeyValue label="College" value={lookups.collegeOf(p.participantId)?.name ?? "—"} />
                 <KeyValue label="Submitted" value={relativeTime(p.submittedAt)} />
                 {p.reviewedAt ? (

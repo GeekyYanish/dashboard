@@ -219,9 +219,17 @@ export interface PaymentFilter {
   method?: string[];
   minAmount?: number;
   maxAmount?: number;
+  /** Exact amounts to keep, e.g. [200] or [200, 250] — splits payers by what they paid. */
+  amounts?: number[];
   from?: string;
   to?: string;
   flaggedOnly?: boolean;
+  /**
+   * Fetch up to the backend's full page rather than the default 200 newest.
+   * For callers that count or group the list, which would otherwise silently
+   * leave out the oldest payments.
+   */
+  wide?: boolean;
 }
 
 export interface PaymentRepo {

@@ -42,13 +42,16 @@ export function LedgerScreen() {
       search: dSearch || undefined,
       status: facetState.status?.length ? facetState.status : undefined,
       method: facetState.method?.length ? facetState.method : undefined,
+      amounts: facetState.amount?.length ? facetState.amount.map(Number) : undefined,
       flaggedOnly: facetState.flags?.includes("flagged") || undefined,
     }),
     [dSearch, facetState],
   );
 
   const rows = useAsync(() => getRepo().payments.list(filter), [filter]);
-  const all = useAsync(() => getRepo().payments.list(), []);
+  // Wide: the facet counts below are tallied from this list, so it must hold
+  // every payment the backend will hand over, not just the 200 newest.
+  const all = useAsync(() => getRepo().payments.list({ wide: true }), []);
   const stats = useAsync(() => getRepo().overview.stats(), []);
 
   const totals = useMemo(() => {
@@ -87,6 +90,22 @@ export function LedgerScreen() {
     return { ...t, avgTicket: t.verifiedCount ? t.collected / t.verifiedCount : 0 };
   }, [all.data, stats.data, lookups]);
 
+  const amountOptions = useMemo(() => {
+    const status = facetState.status ?? [];
+    const method = facetState.method ?? [];
+    const counts = new Map<number, number>();
+    for (const p of all.data ?? []) {
+      if (status.length && !status.includes(p.status)) continue;
+      if (method.length && !(p.method != null && method.includes(p.method))) continue;
+      counts.set(p.amount, (counts.get(p.amount) ?? 0) + 1);
+    }
+    // Keep a selected amount listed even when the filters above empty it, so it can be un-ticked.
+    for (const picked of facetState.amount ?? []) if (!counts.has(Number(picked))) counts.set(Number(picked), 0);
+    return [...counts.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([amount, count]) => ({ value: String(amount), label: inr(amount), count }));
+  }, [all.data, facetState.status, facetState.method, facetState.amount]);
+
   const facets: Facet[] = [
     {
       key: "status",
@@ -107,6 +126,17 @@ export function LedgerScreen() {
         label: m.label,
         count: (all.data ?? []).filter((p) => p.method === m.id).length,
       })),
+    },
+    {
+      /* One option per amount that actually occurs (₹200, ₹250, …), so the
+         split follows whatever the pricing was rather than a hard-coded pair.
+         Counted over the payments the Status/Method choices above already keep,
+         so picking "Verified" turns these into the head-count of people who paid
+         each amount. */
+      key: "amount",
+      label: "Amount",
+      selected: facetState.amount ?? [],
+      options: amountOptions,
     },
     {
       key: "flags",

@@ -276,7 +276,7 @@ export class HttpPayments implements PaymentRepo {
        `status` used to send only the first selected value — the backend accepts
        a comma-separated list, so picking more than one status quietly dropped
        every status after the first. */
-    const hasClientFilter = Boolean(filter.search) || Boolean(filter.flaggedOnly);
+    const hasClientFilter = Boolean(filter.search) || Boolean(filter.flaggedOnly) || Boolean(filter.amounts?.length) || Boolean(filter.wide);
     const result = await api.get<any>("/api/v1/admin/payments", {
       status: filter.status?.join(","),
       participantId: filter.participantId,
@@ -284,6 +284,7 @@ export class HttpPayments implements PaymentRepo {
     });
     let rows: any[] = result.items ?? [];
     if (filter.flaggedOnly) rows = rows.filter((row) => (row.fraudFlags ?? []).length > 0);
+    if (filter.amounts?.length) rows = rows.filter((row) => filter.amounts.includes(Number(row.amount ?? 0)));
     const q = typeof filter.search === "string" ? filter.search.trim().toLowerCase() : "";
     if (q) {
       rows = rows.filter((row) =>

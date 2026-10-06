@@ -108,9 +108,16 @@ function toParticipant(value: any): Participant {
   };
 }
 
+/**
+ * The backend returns the newest 500 accounts unless asked for more (its cap is
+ * 2,000). Every screen resolves "who is this participant?" from this one list,
+ * so a festival past 500 accounts rendered its oldest payers as "Unknown".
+ */
+const PARTICIPANT_PAGE = 2000;
+
 export class HttpParticipants implements ParticipantRepo {
   async list(filter: any = {}) {
-    const rows = await api.get<any[]>("/api/v1/admin/participants", { ...scopeQuery(), ...(filter.eventId ? { eventId: filter.eventId } : {}), search: filter.search, collegeId: filter.collegeId, category: filter.category });
+    const rows = await api.get<any[]>("/api/v1/admin/participants", { ...scopeQuery(), ...(filter.eventId ? { eventId: filter.eventId } : {}), search: filter.search, collegeId: filter.collegeId, category: filter.category, limit: PARTICIPANT_PAGE });
     return rows.map(toParticipant).filter((participant) => !filter.gender || participant.gender === filter.gender);
   }
   async get(id: string) {
@@ -245,6 +252,9 @@ function toPayment(value: any): Payment {
     reviewNote: value.reviewNote ?? null,
     deskShiftId: value.deskShiftId ?? null,
     fraudFlags: value.fraudFlags ?? [],
+    participantName: value.participantName ?? null,
+    participantEmail: value.participantEmail ?? null,
+    participantCode: value.participantCode ?? null,
   };
 }
 

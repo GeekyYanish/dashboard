@@ -120,14 +120,14 @@ export function LedgerScreen() {
     {
       key: "participant",
       header: "Participant",
-      sortValue: (p) => lookups.participant(p.participantId)?.fullName ?? "",
+      sortValue: (p) => lookups.participant(p.participantId)?.fullName ?? p.participantName ?? "",
       cell: (p) => {
         const who = lookups.participant(p.participantId);
         return (
           <div className="min-w-0">
-            <div className="truncate font-medium text-ink">{who?.fullName ?? "Unknown"}</div>
+            <div className="truncate font-medium text-ink">{who?.fullName ?? p.participantName ?? "Unknown"}</div>
             <div className="truncate font-mono text-[0.72rem] text-ink-muted">
-              {who?.code} · {lookups.collegeOf(p.participantId)?.shortName ?? "—"}
+              {who?.code ?? p.participantCode} ·{lookups.collegeOf(p.participantId)?.shortName ?? "—"}
             </div>
           </div>
         );
@@ -229,8 +229,8 @@ export function LedgerScreen() {
         return [
           p.id,
           p.invoiceSerial ?? "",
-          who?.fullName ?? "",
-          who?.code ?? "",
+          who?.fullName ?? p.participantName ?? "",
+          who?.code ?? p.participantCode ?? "",
           lookups.collegeOf(p.participantId)?.name ?? "",
           p.amount,
           p.method,

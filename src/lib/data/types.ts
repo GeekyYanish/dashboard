@@ -225,6 +225,15 @@ export interface Payment {
   deskShiftId: string | null;
   /** Populated by the fraud sweep — surfaced as a review lane. */
   fraudFlags: FraudFlag[];
+  /**
+   * Who paid, as the backend resolved it when it served the payment. Money
+   * screens show these when the participant lookup has no entry (that list is
+   * capped, so an older account can be missing from it) rather than "Unknown".
+   * Absent on the local mock repository.
+   */
+  participantName?: string | null;
+  participantEmail?: string | null;
+  participantCode?: string | null;
 }
 
 export type FraudFlagKind =

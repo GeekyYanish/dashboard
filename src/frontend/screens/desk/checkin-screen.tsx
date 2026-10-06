@@ -38,7 +38,19 @@ export function CheckinScreen() {
   const [query, setQuery] = useState("");
   const dQuery = useDebounced(query, 160);
   const [eventId, setEventId] = useState("");
-  const [recent, setRecent] = useState<{ name: string; already: boolean; at: string }[]>([]);
+  const recentCheckins = useMemo(() => {
+    if (!attendance.data) return [];
+    return attendance.data
+      .filter((a) => (mode === "event" ? a.eventId === eventId : !a.eventId))
+      .sort((a, b) => new Date(b.checkedInAt).getTime() - new Date(a.checkedInAt).getTime())
+      .slice(0, 15)
+      .map((a) => ({
+        id: a.id,
+        name: lookups.participant(a.participantId)?.fullName ?? "Unknown",
+        participantId: a.participantId,
+        at: a.checkedInAt,
+      }));
+  }, [attendance.data, mode, eventId, lookups]);
 
   const attendance = useAsync(() => getRepo().attendance.list(), []);
   const results = useAsync(
@@ -77,13 +89,23 @@ export function CheckinScreen() {
         eventId: mode === "event" && eventId ? eventId : null,
         method: "manual",
       });
-      setRecent((r) => [{ name, already: res.wasAlready, at: res.record.checkedInAt }, ...r].slice(0, 8));
       if (res.wasAlready) toast.info("Already checked in", `${name} — no duplicate recorded.`);
       else toast.success("Checked in", name);
       attendance.reload();
       setQuery("");
     } catch (e) {
       toast.error(isDataError(e) ? e.message : "Check-in failed");
+    }
+  };
+
+  const undoCheckIn = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to mark ${name} as absent?`)) return;
+    try {
+      await getRepo().attendance.undoCheckIn(id);
+      toast.success("Marked absent", name);
+      attendance.reload();
+    } catch (e) {
+      toast.error(isDataError(e) ? e.message : "Undo failed");
     }
   };
 
@@ -296,22 +318,34 @@ export function CheckinScreen() {
             <NeoCard className="flex-1">
               <NeoCard.Header eyebrow="Just now" title="Recent check-ins" />
               <NeoCard.Body flush>
-                {recent.length === 0 ? (
+                {recentCheckins.length === 0 ? (
                   <EmptyState
                     title="Nothing yet today"
                     hint={`Check-ins appear here as they happen. Attendance opens on ${FEST.days[0].label} — ${new Date(FEST.startsAt).toLocaleDateString("en-IN", { day: "numeric", month: "long" })}.`}
                   />
                 ) : (
                   <ul className="divide-y divide-hairline">
-                    {recent.map((r, i) => (
-                      <li key={i} className="flex items-center gap-3 px-4 py-2.5">
+                    {recentCheckins.map((r) => (
+                      <li key={r.id} className="group flex items-center gap-3 px-4 py-2.5 hover:bg-plane-alt">
                         <NeoAvatar name={r.name} size={28} />
                         <span className="min-w-0 flex-1 truncate text-[0.85rem] font-medium text-ink">
                           {r.name}
+                          <span className="block text-[0.7rem] text-ink-muted">
+                            {new Date(r.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
                         </span>
-                        <StatusBadge tone={r.already ? "neutral" : "paid"} size="sm">
-                          {r.already ? "Already in" : "Checked in"}
-                        </StatusBadge>
+                        <div className="flex items-center gap-2">
+                          <StatusBadge tone="paid" size="sm">
+                            Checked in
+                          </StatusBadge>
+                          <button
+                            onClick={() => undoCheckIn(r.id, r.name)}
+                            className="hidden shrink-0 rounded p-1 text-danger hover:bg-danger/10 group-hover:block"
+                            title="Undo (mark absent)"
+                          >
+                            <UserX className="size-4" />
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>

@@ -473,6 +473,9 @@ export class HttpAttendance implements AttendanceRepo {
       day: row.day
     })).filter(a => (!day || a.day === day) && (!eventId || a.eventId === eventId));
   }
+  async undoCheckIn(id: string) {
+    await api.delete(`/api/v1/admin/attendance/${id}`);
+  }
   async checkIn(input: { participantId: string; eventId?: string | null; method?: "qr" | "manual" | "self" }) {
     const res = await api.post<any>("/api/v1/admin/attendance/check-in", {
       participantId: input.participantId,

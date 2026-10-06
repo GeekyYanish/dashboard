@@ -70,6 +70,7 @@ export function CheckinScreen() {
   const uniquePeople = new Set((attendance.data ?? []).map((a) => a.participantId)).size;
 
   const doCheckIn = async (participantId: string, name: string) => {
+    if (mode === "event" && !eventId) return;
     try {
       const res = await getRepo().attendance.checkIn({
         participantId,
@@ -245,7 +246,8 @@ export function CheckinScreen() {
                 autoFocus
                 value={query}
                 onValueChange={setQuery}
-                placeholder="Badge code, name or phone…"
+                placeholder={mode === "event" && !eventId ? "Select an event first..." : "Badge code, name or phone…"}
+                disabled={mode === "event" && !eventId}
               />
 
               <div className="space-y-1.5">

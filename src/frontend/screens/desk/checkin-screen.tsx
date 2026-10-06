@@ -38,7 +38,9 @@ export function CheckinScreen() {
   const [query, setQuery] = useState("");
   const dQuery = useDebounced(query, 160);
   const [eventId, setEventId] = useState("");
-  const recentCheckins = useMemo(() => {
+  
+  const attendance = useAsync(() => getRepo().attendance.list(), []);
+const recentCheckins = useMemo(() => {
     if (!attendance.data) return [];
     return attendance.data
       .filter((a) => (mode === "event" ? a.eventId === eventId : !a.eventId))
@@ -51,8 +53,6 @@ export function CheckinScreen() {
         at: a.checkedInAt,
       }));
   }, [attendance.data, mode, eventId, lookups]);
-
-  const attendance = useAsync(() => getRepo().attendance.list(), []);
   const results = useAsync(
     async () => {
       if (dQuery.trim().length < 2) return [];

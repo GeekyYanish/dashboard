@@ -340,7 +340,7 @@ const recentCheckins = useMemo(() => {
                           </StatusBadge>
                           <button
                             onClick={() => undoCheckIn(r.id, r.name)}
-                            className="hidden shrink-0 rounded p-1 text-danger hover:bg-danger/10 group-hover:block"
+                            className="shrink-0 rounded p-1 text-danger/50 transition-colors hover:bg-danger/10 hover:text-danger"
                             title="Undo (mark absent)"
                           >
                             <UserX className="size-4" />

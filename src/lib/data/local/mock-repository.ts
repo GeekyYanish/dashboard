@@ -1258,6 +1258,7 @@ export class MockRepository implements Repository {
       if (filter?.method?.length) rows = rows.filter((p) => p.method != null && filter.method!.includes(p.method));
       if (filter?.minAmount != null) rows = rows.filter((p) => p.amount >= filter.minAmount!);
       if (filter?.maxAmount != null) rows = rows.filter((p) => p.amount <= filter.maxAmount!);
+      if (filter?.amounts?.length) rows = rows.filter((p) => filter.amounts!.includes(p.amount));
       if (filter?.from) rows = rows.filter((p) => p.submittedAt >= filter.from!);
       if (filter?.to) rows = rows.filter((p) => p.submittedAt <= filter.to!);
       if (filter?.flaggedOnly) rows = rows.filter((p) => p.fraudFlags.length > 0);

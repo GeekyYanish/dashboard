@@ -130,6 +130,7 @@ export interface ParticipantFilter {
   gender?: string;
   docsComplete?: boolean;
   hasDues?: boolean;
+  eventId?: string;
 }
 
 export interface ParticipantRepo {

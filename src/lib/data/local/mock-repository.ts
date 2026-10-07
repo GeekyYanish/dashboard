@@ -630,6 +630,14 @@ export class MockRepository implements Repository {
   participants = {
     list: async (filter?: ParticipantFilter): Promise<Participant[]> => {
       let rows = this.d.participants;
+      if (filter?.eventId) {
+        const participantIds = new Set(
+          this.d.registrations
+            .filter((r) => r.eventId === filter.eventId && r.status !== "cancelled" && r.status !== "rejected")
+            .map((r) => r.participantId)
+        );
+        rows = rows.filter((p) => participantIds.has(p.id));
+      }
       if (filter?.collegeId) rows = rows.filter((p) => p.collegeId === filter.collegeId);
       if (filter?.category) rows = rows.filter((p) => p.category === filter.category);
       if (filter?.gender) rows = rows.filter((p) => p.gender === filter.gender);

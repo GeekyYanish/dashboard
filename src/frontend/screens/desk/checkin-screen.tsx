@@ -20,7 +20,7 @@ import {
 import { useAsync, useDebounced } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
-import { isDataError, type Registration } from "@/lib/data/types";
+import { isDataError, type Registration, type Participant } from "@/lib/data/types";
 import { FEST } from "@/lib/fest.config";
 import { downloadCsv, relativeTime } from "@/lib/utils";
 
@@ -55,16 +55,40 @@ const recentCheckins = useMemo(() => {
   }, [attendance.data, mode, eventId, lookups]);
   const results = useAsync(
     async () => {
-      if (dQuery.trim().length < 2) return [];
-      const res = await getRepo().participants.search(
-        dQuery, 
-        15, 
-        mode === "event" && eventId ? eventId : undefined
-      );
-      if (mode === "event") {
-        return res.filter((p) => p.festAttendance).slice(0, 6);
+      const q = dQuery.trim().toLowerCase();
+      const filterEventId = mode === "event" && eventId ? eventId : undefined;
+      let res: Participant[] = [];
+
+      if (q.length === 0) {
+        res = await getRepo().participants.list({ eventId: filterEventId });
+      } else if (q.length < 2) {
+        return [];
+      } else {
+        res = await getRepo().participants.search(
+          dQuery, 
+          15, 
+          filterEventId
+        );
+        const teams = await getRepo().teams.list(filterEventId);
+        const matchedTeams = teams.filter(t => t.name.toLowerCase().includes(q));
+        if (matchedTeams.length > 0) {
+          const teamMemberIds = Array.from(new Set(matchedTeams.flatMap(t => t.memberIds)));
+          const allParticipants = await getRepo().participants.list({ eventId: filterEventId });
+          const teamMembers = allParticipants.filter(p => teamMemberIds.includes(p.id));
+          const existingIds = new Set(res.map(p => p.id));
+          for (const member of teamMembers) {
+            if (!existingIds.has(member.id)) {
+              res.push(member);
+              existingIds.add(member.id);
+            }
+          }
+        }
       }
-      return res.slice(0, 6);
+
+      if (mode === "event") {
+        return res.filter((p) => p.festAttendance).slice(0, 50);
+      }
+      return res.slice(0, 50);
     },
     [dQuery, mode, eventId],
   );
@@ -272,7 +296,7 @@ const recentCheckins = useMemo(() => {
                 disabled={mode === "event" && !eventId}
               />
 
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
                 {(results.data ?? []).map((p) => (
                   <button
                     key={p.id}

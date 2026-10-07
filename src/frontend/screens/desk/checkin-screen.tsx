@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { ScanLine, Check, UserX, ArrowUpFromLine, Download } from "lucide-react";
 import { Page, PageHeader } from "@/frontend/components/page";
 import {
@@ -38,6 +38,25 @@ export function CheckinScreen() {
   const [query, setQuery] = useState("");
   const dQuery = useDebounced(query, 160);
   const [eventId, setEventId] = useState("");
+  const [displayLimit, setDisplayLimit] = useState(50);
+  const loaderRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setDisplayLimit(50);
+  }, [dQuery, mode, eventId]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setDisplayLimit((prev) => prev + 50);
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (loaderRef.current) observer.observe(loaderRef.current);
+    return () => observer.disconnect();
+  }, []);
   
   const attendance = useAsync(() => getRepo().attendance.list(), []);
 const recentCheckins = useMemo(() => {
@@ -66,15 +85,14 @@ const recentCheckins = useMemo(() => {
       } else {
         res = await getRepo().participants.search(
           dQuery, 
-          15, 
+          100, 
           filterEventId
         );
         const teams = await getRepo().teams.list(filterEventId);
         const matchedTeams = teams.filter(t => t.name.toLowerCase().includes(q));
         if (matchedTeams.length > 0) {
           const teamMemberIds = Array.from(new Set(matchedTeams.flatMap(t => t.memberIds)));
-          const allParticipants = await getRepo().participants.list({ eventId: filterEventId });
-          const teamMembers = allParticipants.filter(p => teamMemberIds.includes(p.id));
+          const teamMembers = (await Promise.all(teamMemberIds.map(id => getRepo().participants.get(id)))).filter(Boolean) as Participant[];
           const existingIds = new Set(res.map(p => p.id));
           for (const member of teamMembers) {
             if (!existingIds.has(member.id)) {
@@ -86,9 +104,9 @@ const recentCheckins = useMemo(() => {
       }
 
       if (mode === "event") {
-        return res.filter((p) => p.festAttendance).slice(0, 50);
+        return res.filter((p) => p.festAttendance);
       }
-      return res.slice(0, 50);
+      return res;
     },
     [dQuery, mode, eventId],
   );
@@ -297,7 +315,7 @@ const recentCheckins = useMemo(() => {
               />
 
               <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
-                {(results.data ?? []).map((p) => (
+                {(results.data ?? []).slice(0, displayLimit).map((p) => (
                   <button
                     key={p.id}
                     onClick={() => doCheckIn(p.id, p.fullName)}
@@ -324,6 +342,7 @@ const recentCheckins = useMemo(() => {
                     })()}
                   </button>
                 ))}
+                <div ref={loaderRef} className="h-4" />
               </div>
 
               {eventStats.data && mode === "event" ? (

@@ -365,7 +365,15 @@ export class HttpEvents implements EventRepo {
   async get(id: string) { try { const value = await api.get<any[]>("/api/v1/admin/events", { eventId: id }); return value[0] ? toEvent(value[0]) : null; } catch (error) { throw error; } }
   async stats(eventId: string): Promise<EventStats> { const value = await api.get<any>("/api/v1/admin/overview", { eventId }); const confirmedCount = value.confirmedRegistrations ?? 0; const pendingCount = value.pendingRegistrations ?? 0; return { eventId, confirmedCount, pendingCount, waitlistCount: value.waitlistedRegistrations ?? 0, checkedInCount: 0, capacity: value.capacity ?? null, seatsLeft: value.capacity == null ? null : Math.max(0, value.capacity - (value.filledSeats ?? 0)), filled: value.filledSeats ?? confirmedCount + pendingCount, revenue: value.verifiedRevenueInr ?? 0 }; }
   async allStats() { const events = await this.list(); return Promise.all(events.map((event) => this.stats(event.id))); }
-  async update(): Promise<FestEvent> { throw new DataError("FORBIDDEN", "Event edits are not enabled in the live registration core."); }
+  /* Only an event's status can be changed: everything else about an event is
+     read from the Google Sheet, which is where it has to be edited. */
+  async update(id: string, patch: Partial<FestEvent>): Promise<FestEvent> {
+    const fields = Object.keys(patch);
+    if (fields.length !== 1 || fields[0] !== "status" || !patch.status) {
+      throw new DataError("FORBIDDEN", "Only an event's status can be changed here — edit the rest in the events sheet.");
+    }
+    return toEvent(await api.patch<any>(`/api/v1/admin/events/${encodeURIComponent(id)}/status`, { status: patch.status }));
+  }
   async venueClashes() { return []; }
 }
 

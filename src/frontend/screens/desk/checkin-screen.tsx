@@ -92,7 +92,7 @@ const recentCheckins = useMemo(() => {
         const matchedTeams = teams.filter(t => t.name.toLowerCase().includes(q));
         if (matchedTeams.length > 0) {
           const teamMemberIds = Array.from(new Set(matchedTeams.flatMap(t => t.memberIds)));
-          const teamMembers = (await Promise.all(teamMemberIds.map(id => getRepo().participants.get(id)))).filter(Boolean) as Participant[];
+          const teamMembers = teamMemberIds.map(id => lookups.participant(id)).filter(Boolean) as Participant[];
           const existingIds = new Set(res.map(p => p.id));
           for (const member of teamMembers) {
             if (!existingIds.has(member.id)) {

@@ -427,11 +427,11 @@ export interface AttendanceRepo {
   list(day?: string, eventId?: string): Promise<Attendance[]>;
   /** Idempotent — a second check-in returns the original with no side effects. */
   checkIn(input: {
-  undoCheckIn(id: string): Promise<void>;
     participantId: string;
     eventId?: string | null;
     method?: "qr" | "manual" | "self";
   }): Promise<{ record: Attendance; wasAlready: boolean }>;
+  undoCheckIn(id: string): Promise<void>;
   /** Confirmed but never checked in — candidates for waitlist reallocation. */
   noShows(eventId: string): Promise<Registration[]>;
 }

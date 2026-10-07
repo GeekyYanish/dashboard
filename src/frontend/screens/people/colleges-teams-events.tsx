@@ -48,6 +48,21 @@ import { downloadCsv, downloadExcel, relativeTime } from "@/lib/utils";
    institutions, not individuals, so this is the level the team actually works.
    ========================================================================== */
 
+interface ContingentLike {
+  college: { isVerified: boolean };
+  paid?: number;
+  paidPeople?: number;
+  confirmed?: number;
+}
+
+export function isCollegePaid(c: ContingentLike): boolean {
+  return (c.paidPeople ?? 0) > 0 || (c.paid ?? 0) > 0;
+}
+
+export function isCollegeVerified(c: ContingentLike): boolean {
+  return c.college.isVerified || isCollegePaid(c);
+}
+
 export function CollegesScreen() {
   const contingents = useAsync(() => getRepo().colleges.contingents(), []);
   const [search, setSearch] = useState("");
@@ -58,11 +73,11 @@ export function CollegesScreen() {
   const rows = useMemo(() => {
     let d = contingents.data ?? [];
     const verification = facetState.verification?.[0];
-    if (verification === "verified") d = d.filter((c) => c.college.isVerified);
-    else if (verification === "unverified") d = d.filter((c) => !c.college.isVerified);
+    if (verification === "verified") d = d.filter(isCollegeVerified);
+    else if (verification === "unverified") d = d.filter((c) => !isCollegeVerified(c));
     const payment = facetState.payment?.[0];
-    if (payment === "confirmed") d = d.filter((c) => c.paidPeople > 0);
-    else if (payment === "awaiting") d = d.filter((c) => c.paidPeople === 0);
+    if (payment === "confirmed") d = d.filter(isCollegePaid);
+    else if (payment === "awaiting") d = d.filter((c) => !isCollegePaid(c));
     if (!dSearch) return d;
     const q = dSearch.toLowerCase();
     return d.filter(
@@ -75,20 +90,19 @@ export function CollegesScreen() {
 
   const totals = useMemo(() => {
     const d = contingents.data ?? [];
-    const unverified = d.filter((c) => !c.college.isVerified).length;
-    // "Confirmed" here means real money in, not just a name on a list — at
-    // least one person from that college has a verified payment. A college
-    // with a dozen profiles and zero paid people is still just names.
-    const confirmedColleges = d.filter((c) => c.paidPeople > 0).length;
+    const verified = d.filter(isCollegeVerified).length;
+    const unverified = d.length - verified;
+    const confirmedColleges = d.filter(isCollegePaid).length;
+    const awaitingPayment = d.length - confirmedColleges;
     return {
       colleges: d.length,
       people: d.reduce((s, c) => s + c.participants, 0),
       paid: d.reduce((s, c) => s + c.paid, 0),
       due: d.reduce((s, c) => s + c.due, 0),
-      verified: d.length - unverified,
+      verified,
       unverified,
       confirmedColleges,
-      awaitingPayment: d.length - confirmedColleges,
+      awaitingPayment,
     };
   }, [contingents.data]);
 
@@ -103,7 +117,7 @@ export function CollegesScreen() {
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="truncate font-medium text-ink">{r.college.shortName}</span>
-            {r.college.isVerified ? (
+            {isCollegeVerified(r) ? (
               <BadgeCheck className="size-3.5 shrink-0 text-paid" aria-label="Verified" />
             ) : null}
           </div>
@@ -222,8 +236,8 @@ export function CollegesScreen() {
                 ["College", "Short", "City", "State", "Verified", "Participants", "Confirmed", "Paid people", "Paid", "Due", "Beds", "Lead", "Lead phone", "Faculty escort"],
                 ...rows.map((r) => [
                   r.college.name, r.college.shortName, r.college.city, r.college.state,
-                  r.college.isVerified ? "yes" : "no", r.participants, r.confirmed,
-                  r.paidPeople, r.paid, r.due, r.accommodation, r.college.contactName,
+                  isCollegeVerified(r) ? "yes" : "no", r.participants, r.confirmed,
+                  r.paidPeople ?? (isCollegePaid(r) ? 1 : 0), r.paid, r.due, r.accommodation, r.college.contactName,
                   r.college.contactPhone, r.college.facultyEscortName ?? "",
                 ]),
               ])
@@ -242,13 +256,13 @@ export function CollegesScreen() {
           label="Verified colleges"
           value={totals.verified}
           icon={<BadgeCheck />}
-          deltaLabel="Nomination letter checked"
+          deltaLabel="Paid or nomination letter checked"
         />
         <NeoStatTile
           label="Unverified institutions"
           value={totals.unverified}
           icon={<AlertTriangle />}
-          deltaLabel="Nomination letter not checked"
+          deltaLabel="Unpaid and letter not checked"
         />
         <NeoStatTile
           label="Confirmed colleges"
@@ -839,6 +853,17 @@ export function TeamsScreen() {
    Events
    ========================================================================== */
 
+function formatLabel(e: Pick<FestEvent, "minTeamSize" | "maxTeamSize">) {
+  if (e.maxTeamSize <= 1) return "Solo";
+  if (e.minTeamSize === e.maxTeamSize) return `Team of ${e.maxTeamSize}`;
+  return `Team of ${e.minTeamSize}–${e.maxTeamSize}`;
+}
+
+function eventTime(iso: string, opts: Intl.DateTimeFormatOptions) {
+  const d = new Date(iso);
+  return d.getTime() > 0 ? d.toLocaleString("en-IN", opts) : "—";
+}
+
 export function EventsScreen() {
   const events = useAsync(() => getRepo().events.list(), []);
   const stats = useAsync(() => getRepo().events.allStats(), []);
@@ -876,19 +901,16 @@ export function EventsScreen() {
       sortValue: (e) => e.startsAt,
       cell: (e) => (
         <span className="text-[0.76rem] text-ink-muted">
-          {e.day.toUpperCase()} ·{" "}
-          {new Date(e.startsAt).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}
+          {e.day.toUpperCase()} · {eventTime(e.startsAt, { hour: "numeric", minute: "2-digit" })}
         </span>
       ),
     },
     {
       key: "team",
       header: "Format",
-      width: "92px",
+      width: "110px",
       cell: (e) => (
-        <span className="text-[0.76rem] text-ink-muted">
-          {e.maxTeamSize === 1 ? "Solo" : `Team ${e.minTeamSize}–${e.maxTeamSize}`}
-        </span>
+        <span className="text-[0.76rem] text-ink-muted">{formatLabel(e)}</span>
       ),
     },
     {
@@ -918,6 +940,7 @@ export function EventsScreen() {
             />
             <span className={`tnum mt-1 block text-[0.7rem] ${over ? "text-failed" : "text-ink-faint"}`}>
               {filled} / {e.capacity}
+              {e.maxTeamSize > 1 ? (e.capacity === 1 ? " team" : " teams") : ""}
               {over ? " — over capacity" : ""}
             </span>
           </div>
@@ -963,6 +986,66 @@ export function EventsScreen() {
     },
   ];
 
+  const [exporting, setExporting] = useState(false);
+
+  async function exportEvent(ev: FestEvent) {
+    setExporting(true);
+    try {
+      const repo = getRepo();
+      const [regs, teams] = await Promise.all([
+        repo.registrations.list({ eventId: ev.id }),
+        repo.teams.list(ev.id),
+      ]);
+      if (!regs.length) {
+        toast.info("No registrations to export for this event");
+        return;
+      }
+      const teamById = new Map(teams.map((t) => [t.id, t]));
+      const people = new Map(
+        (
+          await Promise.all([...new Set(regs.map((r) => r.participantId))].map((id) => repo.participants.get(id)))
+        )
+          .filter((p): p is NonNullable<typeof p> => !!p)
+          .map((p) => [p.id, p]),
+      );
+      const header = [
+        "Team", "Team code", "Role", "Participant code", "Name", "Email", "Phone",
+        "College", "Department", "Year", "Registration status", "Payment status", "Registered at",
+      ];
+      const body = regs
+        .map((r) => {
+          const t = r.teamId ? teamById.get(r.teamId) : undefined;
+          const p = people.get(r.participantId);
+          return {
+            sort: `${t?.name ?? "\uffff"}|${t && t.leaderParticipantId === r.participantId ? 0 : 1}|${r.participantName ?? p?.fullName ?? ""}`,
+            row: [
+              t?.name ?? (r.teamId ? r.teamId : ""),
+              t?.joinCode ?? "",
+              t ? (t.leaderParticipantId === r.participantId ? "Leader" : "Member") : ev.maxTeamSize > 1 ? "" : "Individual",
+              r.participantCode ?? p?.code ?? "",
+              r.participantName ?? p?.fullName ?? "",
+              r.participantEmail ?? p?.email ?? "",
+              p?.phone ?? "",
+              p?.collegeName ?? p?.customCollegeName ?? "",
+              p?.department ?? "",
+              p?.yearOfStudy ?? "",
+              r.status,
+              r.paymentStatus ?? "",
+              r.registeredAt,
+            ] as (string | number | null)[],
+          };
+        })
+        .sort((a, b) => a.sort.localeCompare(b.sort))
+        .map((x) => x.row);
+      downloadCsv(`${ev.slug}-registrations.csv`, [header, ...body]);
+      toast.success(`Exported ${body.length} participants`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const focused = openId ? (events.data ?? []).find((e) => e.id === openId) : null;
   const focusedStats = openId ? statMap.get(openId) : undefined;
 
@@ -977,7 +1060,7 @@ export function EventsScreen() {
             id: e.id,
             label: e.title,
             value: e.capacity ? Math.min(120, (filled / e.capacity) * 100) : 0,
-            hint: `${filled} of ${e.capacity} · ${s?.waitlistCount ?? 0} waitlisted · ${inr(s?.revenue ?? 0, { compact: true })}`,
+            hint: `${filled} of ${e.capacity}${e.maxTeamSize > 1 ? " teams" : ""} · ${s?.waitlistCount ?? 0} waitlisted · ${inr(s?.revenue ?? 0, { compact: true })}`,
           };
         })
         .sort((a, b) => b.value - a.value),
@@ -1037,6 +1120,15 @@ export function EventsScreen() {
         title={focused?.title ?? ""}
         footer={
           focused ? (
+            <div className="flex items-center gap-2">
+            <NeoButton
+              size="sm"
+              variant="secondary"
+              loading={exporting}
+              onClick={() => exportEvent(focused)}
+            >
+              Export
+            </NeoButton>
             <NeoButton
               size="sm"
               variant="secondary"
@@ -1052,6 +1144,7 @@ export function EventsScreen() {
             >
               {focused.status === "published" ? "Close registrations" : "Reopen registrations"}
             </NeoButton>
+            </div>
           ) : null
         }
       >
@@ -1069,17 +1162,13 @@ export function EventsScreen() {
               <KeyValue label="Venue" value={focused.venue} />
               <KeyValue
                 label="Starts"
-                value={new Date(focused.startsAt).toLocaleString("en-IN")}
+                value={eventTime(focused.startsAt, { dateStyle: "medium", timeStyle: "short" })}
               />
-              <KeyValue label="Ends" value={new Date(focused.endsAt).toLocaleString("en-IN")} />
               <KeyValue
-                label="Format"
-                value={
-                  focused.maxTeamSize === 1
-                    ? "Solo"
-                    : `Team of ${focused.minTeamSize}–${focused.maxTeamSize}`
-                }
+                label="Ends"
+                value={eventTime(focused.endsAt, { dateStyle: "medium", timeStyle: "short" })}
               />
+              <KeyValue label="Format" value={formatLabel(focused)} />
               <KeyValue label="Capacity" value={focused.capacity?.toString() ?? "Unlimited"} />
               <KeyValue label="Entry fee" value={inr(focused.feeInr)} />
               <KeyValue

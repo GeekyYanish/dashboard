@@ -130,6 +130,7 @@ export interface ParticipantFilter {
   gender?: string;
   docsComplete?: boolean;
   hasDues?: boolean;
+  eventId?: string;
 }
 
 export interface ParticipantRepo {
@@ -137,7 +138,7 @@ export interface ParticipantRepo {
   get(id: string): Promise<Participant | null>;
   getByCode(code: string): Promise<Participant | null>;
   /** Free-text across name / code / phone / email — powers the desk search. */
-  search(q: string, limit?: number): Promise<Participant[]>;
+  search(q: string, limit?: number, eventId?: string): Promise<Participant[]>;
   flags(id: string): Promise<ParticipantFlags>;
   create(input: Omit<Participant, "id" | "code" | "createdAt" | "isBlocked">): Promise<Participant>;
   update(id: string, patch: Partial<Participant>): Promise<Participant>;
@@ -219,9 +220,17 @@ export interface PaymentFilter {
   method?: string[];
   minAmount?: number;
   maxAmount?: number;
+  /** Exact amounts to keep, e.g. [200] or [200, 250] — splits payers by what they paid. */
+  amounts?: number[];
   from?: string;
   to?: string;
   flaggedOnly?: boolean;
+  /**
+   * Fetch up to the backend's full page rather than the default 200 newest.
+   * For callers that count or group the list, which would otherwise silently
+   * leave out the oldest payments.
+   */
+  wide?: boolean;
 }
 
 export interface PaymentRepo {
@@ -423,6 +432,7 @@ export interface AttendanceRepo {
     eventId?: string | null;
     method?: "qr" | "manual" | "self";
   }): Promise<{ record: Attendance; wasAlready: boolean }>;
+  undoCheckIn(id: string): Promise<void>;
   /** Confirmed but never checked in — candidates for waitlist reallocation. */
   noShows(eventId: string): Promise<Registration[]>;
 }

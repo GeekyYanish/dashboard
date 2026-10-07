@@ -107,6 +107,8 @@ export interface Participant {
   createdAt: string;
   createdVia: "online" | "on_spot" | "csv_import";
   isBlocked: boolean;
+  festAttendance?: boolean;
+  festCheckedInAt?: string | null;
 }
 
 /** Derived, never stored: under-18 on the fest start date needs guardian consent. */
@@ -223,6 +225,15 @@ export interface Payment {
   deskShiftId: string | null;
   /** Populated by the fraud sweep — surfaced as a review lane. */
   fraudFlags: FraudFlag[];
+  /**
+   * Who paid, as the backend resolved it when it served the payment. Money
+   * screens show these when the participant lookup has no entry (that list is
+   * capped, so an older account can be missing from it) rather than "Unknown".
+   * Absent on the local mock repository.
+   */
+  participantName?: string | null;
+  participantEmail?: string | null;
+  participantCode?: string | null;
 }
 
 export type FraudFlagKind =
@@ -601,6 +612,15 @@ export interface OverviewStats {
   paidParticipants: number | null;
   collegesOnboarded: number;
   revenueCollected: number;
+  /**
+   * Ledger totals computed over every payment by the backend. The payment list
+   * is paged (200 rows), so summing it in the browser under-counts as soon as
+   * there are more payments than a page. Null/absent when the backend does not
+   * send them (older API, mock data) — the ledger then falls back to the page.
+   */
+  verifiedPayments?: number | null;
+  pendingRevenue?: number | null;
+  flaggedPayments?: number | null;
   revenueExpected: number;
   outstandingDues: number;
   verificationQueueDepth: number;

@@ -42,13 +42,16 @@ export function LedgerScreen() {
       search: dSearch || undefined,
       status: facetState.status?.length ? facetState.status : undefined,
       method: facetState.method?.length ? facetState.method : undefined,
+      amounts: facetState.amount?.length ? facetState.amount.map(Number) : undefined,
       flaggedOnly: facetState.flags?.includes("flagged") || undefined,
     }),
     [dSearch, facetState],
   );
 
   const rows = useAsync(() => getRepo().payments.list(filter), [filter]);
-  const all = useAsync(() => getRepo().payments.list(), []);
+  // Wide: the facet counts below are tallied from this list, so it must hold
+  // every payment the backend will hand over, not just the 200 newest.
+  const all = useAsync(() => getRepo().payments.list({ wide: true }), []);
   const stats = useAsync(() => getRepo().overview.stats(), []);
 
   const totals = useMemo(() => {
@@ -60,14 +63,48 @@ export function LedgerScreen() {
       categoryCountsTowardRevenue(lookups.participant(p.participantId)?.category ?? "participant");
     const verified = data.filter((p) => p.status === "verified" && countsTowardRevenue(p));
     const pending = data.filter((p) => p.status === "pending" && countsTowardRevenue(p));
-    return {
+    const fromPage = {
       collected: verified.reduce((s, p) => s + p.amount, 0),
+      verifiedCount: verified.length,
       pendingValue: pending.reduce((s, p) => s + p.amount, 0),
       pendingCount: pending.length,
       flagged: data.filter((p) => p.fraudFlags.length > 0).length,
-      avgTicket: verified.length ? verified.reduce((s, p) => s + p.amount, 0) / verified.length : 0,
     };
-  }, [all.data, lookups]);
+
+    /* The list above is one page (the API caps it at 200 rows), so once there
+       are more payments than that, every figure summed from it silently leaves
+       out the oldest ones. The backend totals cover every payment; use them
+       whenever it sends them and fall back to the page only for a backend that
+       does not. All-or-nothing, so the cards never mix the two sources. */
+    const s = stats.data;
+    const server = s && s.verifiedPayments != null && s.pendingRevenue != null && s.flaggedPayments != null ? s : null;
+    const t = server
+      ? {
+          collected: server.revenueCollected,
+          verifiedCount: server.verifiedPayments as number,
+          pendingValue: server.pendingRevenue as number,
+          pendingCount: server.verificationQueueDepth,
+          flagged: server.flaggedPayments as number,
+        }
+      : fromPage;
+    return { ...t, avgTicket: t.verifiedCount ? t.collected / t.verifiedCount : 0 };
+  }, [all.data, stats.data, lookups]);
+
+  const amountOptions = useMemo(() => {
+    const status = facetState.status ?? [];
+    const method = facetState.method ?? [];
+    const counts = new Map<number, number>();
+    for (const p of all.data ?? []) {
+      if (status.length && !status.includes(p.status)) continue;
+      if (method.length && !(p.method != null && method.includes(p.method))) continue;
+      counts.set(p.amount, (counts.get(p.amount) ?? 0) + 1);
+    }
+    // Keep a selected amount listed even when the filters above empty it, so it can be un-ticked.
+    for (const picked of facetState.amount ?? []) if (!counts.has(Number(picked))) counts.set(Number(picked), 0);
+    return [...counts.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([amount, count]) => ({ value: String(amount), label: inr(amount), count }));
+  }, [all.data, facetState.status, facetState.method, facetState.amount]);
 
   const facets: Facet[] = [
     {
@@ -91,6 +128,17 @@ export function LedgerScreen() {
       })),
     },
     {
+      /* One option per amount that actually occurs (₹200, ₹250, …), so the
+         split follows whatever the pricing was rather than a hard-coded pair.
+         Counted over the payments the Status/Method choices above already keep,
+         so picking "Verified" turns these into the head-count of people who paid
+         each amount. */
+      key: "amount",
+      label: "Amount",
+      selected: facetState.amount ?? [],
+      options: amountOptions,
+    },
+    {
       key: "flags",
       label: "Fraud",
       selected: facetState.flags ?? [],
@@ -102,14 +150,14 @@ export function LedgerScreen() {
     {
       key: "participant",
       header: "Participant",
-      sortValue: (p) => lookups.participant(p.participantId)?.fullName ?? "",
+      sortValue: (p) => lookups.participant(p.participantId)?.fullName ?? p.participantName ?? "",
       cell: (p) => {
         const who = lookups.participant(p.participantId);
         return (
           <div className="min-w-0">
-            <div className="truncate font-medium text-ink">{who?.fullName ?? "Unknown"}</div>
+            <div className="truncate font-medium text-ink">{who?.fullName ?? p.participantName ?? "Unknown"}</div>
             <div className="truncate font-mono text-[0.72rem] text-ink-muted">
-              {who?.code} · {lookups.collegeOf(p.participantId)?.shortName ?? "—"}
+              {who?.code ?? p.participantCode} ·{lookups.collegeOf(p.participantId)?.shortName ?? "—"}
             </div>
           </div>
         );
@@ -211,8 +259,8 @@ export function LedgerScreen() {
         return [
           p.id,
           p.invoiceSerial ?? "",
-          who?.fullName ?? "",
-          who?.code ?? "",
+          who?.fullName ?? p.participantName ?? "",
+          who?.code ?? p.participantCode ?? "",
           lookups.collegeOf(p.participantId)?.name ?? "",
           p.amount,
           p.method,
@@ -254,7 +302,7 @@ export function LedgerScreen() {
           label="Collected"
           value={inr(totals.collected, { compact: true })}
           icon={<Wallet />}
-          deltaLabel={`${(all.data ?? []).filter((p) => p.status === "verified").length} verified payments`}
+          deltaLabel={`${totals.verifiedCount.toLocaleString("en-IN")} verified payments`}
           spark={
             s ? <Sparkline values={s.series.map((d) => d.revenue)} color="var(--viz-3)" /> : undefined
           }

@@ -673,6 +673,25 @@ export const SUITE: { group: string; name: string; fn: TestFn }[] = [
   // ---- Money invariants ---------------------------------------------------
   {
     group: "Payments",
+    name: "Filtering by amount splits the ledger exactly",
+    fn: async ({ assert, repo }) => {
+      const all = await repo.payments.list();
+      const amounts = [...new Set(all.map((p) => p.amount))];
+      assert(amounts.length > 1, "seed needs more than one amount to test a split");
+      let seen = 0;
+      for (const amount of amounts) {
+        const only = await repo.payments.list({ amounts: [amount] });
+        assert(only.every((p) => p.amount === amount), `a payment outside ₹${amount} leaked into the ₹${amount} filter`);
+        assert(only.length === all.filter((p) => p.amount === amount).length, `count for ₹${amount} is off`);
+        seen += only.length;
+      }
+      assert(seen === all.length, "the per-amount groups do not add up to the whole ledger");
+      const two = await repo.payments.list({ amounts: [amounts[0], amounts[1]] });
+      assert(two.every((p) => p.amount === amounts[0] || p.amount === amounts[1]), "multi-amount filter let another amount through");
+    },
+  },
+  {
+    group: "Payments",
     name: "A reused UTR is rejected",
     fn: async ({ assert, repo }) => {
       const pays = await repo.payments.list();

@@ -140,6 +140,17 @@ export function ParticipantsScreen() {
       ),
     },
     {
+      key: "attendance",
+      header: "Fest Attendance",
+      width: "140px",
+      sortValue: (p) => p.festAttendance ? 1 : 0,
+      cell: (p) => (
+        <StatusBadge tone={p.festAttendance ? "paid" : "neutral"} size="sm" dot={false}>
+          {p.festAttendance ? "Present" : "Not arrived"}
+        </StatusBadge>
+      ),
+    },
+    {
       key: "category",
       header: "Category",
       width: "126px",

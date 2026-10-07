@@ -1,14 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { ScanLine, Check, UserX, ArrowUpFromLine, Download } from "lucide-react";
-import { Page, PageHeader, StatGrid } from "@/frontend/components/page";
+import { Page, PageHeader } from "@/frontend/components/page";
 import {
   NeoCard,
   NeoButton,
   NeoSearchField,
   NeoSelect,
-  NeoStatTile,
   StatusBadge,
   NeoAvatar,
   DataTable,
@@ -18,11 +17,10 @@ import {
   toast,
   type Column,
 } from "@/frontend/components/neo";
-import { BarChart } from "@/frontend/components/charts";
 import { useAsync, useDebounced } from "@/frontend/hooks/use-async";
 import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
-import { isDataError, type Registration } from "@/lib/data/types";
+import { isDataError, type Registration, type Participant } from "@/lib/data/types";
 import { FEST } from "@/lib/fest.config";
 import { downloadCsv, relativeTime } from "@/lib/utils";
 
@@ -40,12 +38,77 @@ export function CheckinScreen() {
   const [query, setQuery] = useState("");
   const dQuery = useDebounced(query, 160);
   const [eventId, setEventId] = useState("");
-  const [recent, setRecent] = useState<{ name: string; already: boolean; at: string }[]>([]);
+  const [displayLimit, setDisplayLimit] = useState(50);
+  const loaderRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    setDisplayLimit(50);
+  }, [dQuery, mode, eventId]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setDisplayLimit((prev) => prev + 50);
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (loaderRef.current) observer.observe(loaderRef.current);
+    return () => observer.disconnect();
+  }, []);
+  
   const attendance = useAsync(() => getRepo().attendance.list(), []);
+const recentCheckins = useMemo(() => {
+    if (!attendance.data) return [];
+    return attendance.data
+      .filter((a) => (mode === "event" ? a.eventId === eventId : !a.eventId))
+      .sort((a, b) => new Date(b.checkedInAt).getTime() - new Date(a.checkedInAt).getTime())
+      .slice(0, 15)
+      .map((a) => ({
+        id: a.id,
+        name: lookups.participant(a.participantId)?.fullName ?? "Unknown",
+        participantId: a.participantId,
+        at: a.checkedInAt,
+      }));
+  }, [attendance.data, mode, eventId, lookups]);
   const results = useAsync(
-    () => (dQuery.trim().length >= 2 ? getRepo().participants.search(dQuery, 6) : Promise.resolve([])),
-    [dQuery],
+    async () => {
+      const q = dQuery.trim().toLowerCase();
+      const filterEventId = mode === "event" && eventId ? eventId : undefined;
+      let res: Participant[] = [];
+
+      if (q.length === 0) {
+        res = await getRepo().participants.list({ eventId: filterEventId });
+      } else if (q.length < 2) {
+        return [];
+      } else {
+        res = await getRepo().participants.search(
+          dQuery, 
+          100, 
+          filterEventId
+        );
+        const teams = await getRepo().teams.list(filterEventId);
+        const matchedTeams = teams.filter(t => t.name.toLowerCase().includes(q));
+        if (matchedTeams.length > 0) {
+          const teamMemberIds = Array.from(new Set(matchedTeams.flatMap(t => t.memberIds)));
+          const teamMembers = teamMemberIds.map(id => lookups.participant(id)).filter(Boolean) as Participant[];
+          const existingIds = new Set(res.map(p => p.id));
+          for (const member of teamMembers) {
+            if (!existingIds.has(member.id)) {
+              res.push(member);
+              existingIds.add(member.id);
+            }
+          }
+        }
+      }
+
+      if (mode === "event") {
+        return res.filter((p) => p.festAttendance);
+      }
+      return res;
+    },
+    [dQuery, mode, eventId],
   );
   const noShows = useAsync(
     () => (eventId ? getRepo().attendance.noShows(eventId) : Promise.resolve([])),
@@ -56,33 +119,35 @@ export function CheckinScreen() {
     [eventId],
   );
 
-  const byDay = useMemo(
-    () =>
-      FEST.days.map((d) => ({
-        label: d.label,
-        value: (attendance.data ?? []).filter((a) => a.day === d.key).length,
-        slot: 0,
-      })),
-    [attendance.data],
-  );
 
   const todayCount = (attendance.data ?? []).length;
   const uniquePeople = new Set((attendance.data ?? []).map((a) => a.participantId)).size;
 
   const doCheckIn = async (participantId: string, name: string) => {
+    if (mode === "event" && !eventId) return;
     try {
       const res = await getRepo().attendance.checkIn({
         participantId,
         eventId: mode === "event" && eventId ? eventId : null,
         method: "manual",
       });
-      setRecent((r) => [{ name, already: res.wasAlready, at: res.record.checkedInAt }, ...r].slice(0, 8));
       if (res.wasAlready) toast.info("Already checked in", `${name} — no duplicate recorded.`);
       else toast.success("Checked in", name);
       attendance.reload();
       setQuery("");
     } catch (e) {
       toast.error(isDataError(e) ? e.message : "Check-in failed");
+    }
+  };
+
+  const undoCheckIn = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to mark ${name} as absent?`)) return;
+    try {
+      await getRepo().attendance.undoCheckIn(id);
+      toast.success("Marked absent", name);
+      attendance.reload();
+    } catch (e) {
+      toast.error(isDataError(e) ? e.message : "Undo failed");
     }
   };
 
@@ -160,45 +225,53 @@ export function CheckinScreen() {
         title="Check-in"
         description="Venue gate and per-event attendance. Scanning the same badge twice is a no-op by design — the second scan reports it rather than double-counting."
         actions={
-          <NeoButton
-            size="sm"
-            variant="secondary"
-            icon={<Download />}
-            onClick={() =>
-              downloadCsv("attendance.csv", [
-                ["Participant", "Code", "College", "Event", "Day", "Method", "Checked in"],
-                ...(attendance.data ?? []).map((a) => {
-                  const p = lookups.participant(a.participantId);
-                  return [
-                    p?.fullName ?? "", p?.code ?? "",
-                    lookups.college(p?.collegeId ?? "")?.name ?? "",
-                    a.eventId ? (lookups.event(a.eventId)?.title ?? "") : "Venue gate",
-                    a.day, a.method, a.checkedInAt,
-                  ];
-                }),
-              ])
-            }
-          >
-            Export attendance
-          </NeoButton>
+          <div className="flex items-center gap-6">
+            <div className="flex gap-4 text-[0.85rem] font-medium text-ink bg-plane-alt px-4 py-1.5 rounded-full border border-hairline">
+              <div className="flex items-center gap-1.5">
+                <span className="text-ink-muted">Total check-ins:</span>
+                <span>{todayCount.toLocaleString("en-IN")}</span>
+              </div>
+              <div className="w-px bg-hairline" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-ink-muted">Unique people:</span>
+                <span>{uniquePeople.toLocaleString("en-IN")}</span>
+              </div>
+              {mode === "noshow" && (
+                <>
+                  <div className="w-px bg-hairline" />
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-ink-muted">No-shows:</span>
+                    <span className={eventId ? "text-danger" : ""}>
+                      {eventId ? (noShows.data?.length ?? 0).toLocaleString("en-IN") : "Select event"}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+            <NeoButton
+              size="sm"
+              variant="secondary"
+              icon={<Download />}
+              onClick={() =>
+                downloadCsv("attendance.csv", [
+                  ["Participant", "Code", "College", "Event", "Day", "Method", "Checked in"],
+                  ...(attendance.data ?? []).map((a) => {
+                    const p = lookups.participant(a.participantId);
+                    return [
+                      p?.fullName ?? "", p?.code ?? "",
+                      lookups.college(p?.collegeId ?? "")?.name ?? "",
+                      a.eventId ? (lookups.event(a.eventId)?.title ?? "") : "Venue gate",
+                      a.day, a.method, a.checkedInAt,
+                    ];
+                  }),
+                ])
+              }
+            >
+              Export attendance
+            </NeoButton>
+          </div>
         }
       />
-
-      <StatGrid cols={4}>
-        <NeoStatTile label="Total check-ins" value={todayCount.toLocaleString("en-IN")} icon={<ScanLine />} />
-        <NeoStatTile label="Unique people" value={uniquePeople.toLocaleString("en-IN")} icon={<Check />} />
-        <NeoStatTile
-          label="No-shows"
-          value={(noShows.data?.length ?? 0).toLocaleString("en-IN")}
-          icon={<UserX />}
-          deltaLabel={eventId ? "For the selected event" : "Pick an event"}
-        />
-        <NeoStatTile
-          label="Fest days"
-          value={FEST.days.length}
-          deltaLabel={FEST.days.map((d) => d.label).join(" · ")}
-        />
-      </StatGrid>
 
       <NeoSegmented
         value={mode}
@@ -237,11 +310,12 @@ export function CheckinScreen() {
                 autoFocus
                 value={query}
                 onValueChange={setQuery}
-                placeholder="Badge code, name or phone…"
+                placeholder={mode === "event" && !eventId ? "Select an event first..." : "Badge code, name or phone…"}
+                disabled={mode === "event" && !eventId}
               />
 
-              <div className="space-y-1.5">
-                {(results.data ?? []).map((p) => (
+              <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
+                {(results.data ?? []).slice(0, displayLimit).map((p) => (
                   <button
                     key={p.id}
                     onClick={() => doCheckIn(p.id, p.fullName)}
@@ -256,9 +330,19 @@ export function CheckinScreen() {
                         {p.code} · {lookups.college(p.collegeId)?.shortName}
                       </span>
                     </span>
-                    <Check className="size-5 shrink-0 text-paid" />
+                    {(() => {
+                      const isCheckedIn = (attendance.data ?? []).some(
+                        (a) => a.participantId === p.id && (mode === "event" ? a.eventId === eventId : !a.eventId)
+                      );
+                      return isCheckedIn ? (
+                        <Check className="size-5 shrink-0 text-paid" />
+                      ) : (
+                        <div className="size-5 shrink-0 rounded-full border-2 border-hairline" />
+                      );
+                    })()}
                   </button>
                 ))}
+                <div ref={loaderRef} className="h-4" />
               </div>
 
               {eventStats.data && mode === "event" ? (
@@ -273,38 +357,43 @@ export function CheckinScreen() {
             </NeoCard.Raw>
           </NeoCard>
 
-          <div className="space-y-4">
-            <NeoCard>
+          <div className="flex flex-col">
+            <NeoCard className="flex-1">
               <NeoCard.Header eyebrow="Just now" title="Recent check-ins" />
               <NeoCard.Body flush>
-                {recent.length === 0 ? (
+                {recentCheckins.length === 0 ? (
                   <EmptyState
                     title="Nothing yet today"
                     hint={`Check-ins appear here as they happen. Attendance opens on ${FEST.days[0].label} — ${new Date(FEST.startsAt).toLocaleDateString("en-IN", { day: "numeric", month: "long" })}.`}
                   />
                 ) : (
                   <ul className="divide-y divide-hairline">
-                    {recent.map((r, i) => (
-                      <li key={i} className="flex items-center gap-3 px-4 py-2.5">
+                    {recentCheckins.map((r) => (
+                      <li key={r.id} className="group flex items-center gap-3 px-4 py-2.5 hover:bg-plane-alt">
                         <NeoAvatar name={r.name} size={28} />
                         <span className="min-w-0 flex-1 truncate text-[0.85rem] font-medium text-ink">
                           {r.name}
+                          <span className="block text-[0.7rem] text-ink-muted">
+                            {new Date(r.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
                         </span>
-                        <StatusBadge tone={r.already ? "neutral" : "paid"} size="sm">
-                          {r.already ? "Already in" : "Checked in"}
-                        </StatusBadge>
+                        <div className="flex items-center gap-2">
+                          <StatusBadge tone="paid" size="sm">
+                            Checked in
+                          </StatusBadge>
+                          <button
+                            onClick={() => undoCheckIn(r.id, r.name)}
+                            className="shrink-0 rounded p-1 text-danger/50 transition-colors hover:bg-danger/10 hover:text-danger"
+                            title="Undo (mark absent)"
+                          >
+                            <UserX className="size-4" />
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>
                 )}
               </NeoCard.Body>
-            </NeoCard>
-
-            <NeoCard>
-              <NeoCard.Header eyebrow="By day" title="Attendance" />
-              <NeoCard.Raw>
-                <BarChart data={byDay} height={160} />
-              </NeoCard.Raw>
             </NeoCard>
           </div>
         </div>

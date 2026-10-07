@@ -7,6 +7,7 @@ import {
   NeoButton,
   NeoInput,
   NeoSelect,
+  NeoCombobox,
   StatusBadge,
   SectionRule,
   toast,
@@ -232,24 +233,25 @@ export function WalkInScreen() {
                   onChange={(e) => setDraft((d) => ({ ...d, dateOfBirth: e.target.value }))}
                   hint="Under 18 needs guardian consent"
                 />
-                <NeoSelect
+                <NeoCombobox
                   label="College"
-                  value={draft.collegeId}
-                  onChange={(e) => setDraft((d) => ({ ...d, collegeId: e.target.value }))}
-                  options={[
-                    { value: "", label: "Choose…" },
-                    ...lookups.colleges.map((c) => ({ value: c.id, label: c.shortName })),
-                    { value: OTHER_COLLEGE, label: "Not listed — type it in" },
-                  ]}
+                  allowCustom
+                  value={draft.collegeId === OTHER_COLLEGE ? draft.customCollegeName : draft.collegeId}
+                  onChange={(val) => {
+                    if (!val) {
+                      setDraft((d) => ({ ...d, collegeId: "", customCollegeName: "" }));
+                      return;
+                    }
+                    const isKnown = lookups.colleges.some((c) => c.id === val);
+                    if (isKnown) {
+                      setDraft((d) => ({ ...d, collegeId: val, customCollegeName: "" }));
+                    } else {
+                      setDraft((d) => ({ ...d, collegeId: OTHER_COLLEGE, customCollegeName: val }));
+                    }
+                  }}
+                  options={lookups.colleges.map((c) => ({ value: c.id, label: c.shortName }))}
+                  placeholder="Search for a college..."
                 />
-                {draft.collegeId === OTHER_COLLEGE ? (
-                  <NeoInput
-                    label="College name"
-                    value={draft.customCollegeName}
-                    onChange={(e) => setDraft((d) => ({ ...d, customCollegeName: e.target.value }))}
-                    placeholder="Type the institution's full name"
-                  />
-                ) : null}
                 <NeoSelect
                   label="Department"
                   value={draft.department}

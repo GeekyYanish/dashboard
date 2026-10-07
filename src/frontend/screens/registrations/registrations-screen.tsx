@@ -54,7 +54,7 @@ type Row = Registration & { group: Registration[] };
 
 const STATUSES = ["pending", "confirmed", "waitlisted", "cancelled", "rejected"] as const;
 
-function resolveEventTrack(eventId: string, lookups: any): string {
+function resolveEventTrack(eventId: string, lookups: { event: (id: string) => { track?: string } | undefined | null }): string {
   const ev = lookups.event(eventId);
   if (ev?.track) return ev.track;
   const id = (eventId || "").toLowerCase();

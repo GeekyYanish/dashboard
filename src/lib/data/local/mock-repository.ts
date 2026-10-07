@@ -630,6 +630,14 @@ export class MockRepository implements Repository {
   participants = {
     list: async (filter?: ParticipantFilter): Promise<Participant[]> => {
       let rows = this.d.participants;
+      if (filter?.eventId) {
+        const participantIds = new Set(
+          this.d.registrations
+            .filter((r) => r.eventId === filter.eventId && r.status !== "cancelled" && r.status !== "rejected")
+            .map((r) => r.participantId)
+        );
+        rows = rows.filter((p) => participantIds.has(p.id));
+      }
       if (filter?.collegeId) rows = rows.filter((p) => p.collegeId === filter.collegeId);
       if (filter?.category) rows = rows.filter((p) => p.category === filter.category);
       if (filter?.gender) rows = rows.filter((p) => p.gender === filter.gender);
@@ -664,11 +672,15 @@ export class MockRepository implements Repository {
     getByCode: async (code: string) =>
       clone(this.d.participants.find((p) => p.code.toLowerCase() === code.toLowerCase()) ?? null),
 
-    search: async (q: string, limit = 12): Promise<Participant[]> => {
+    search: async (q: string, limit = 12, eventId?: string): Promise<Participant[]> => {
       const needle = q.trim().toLowerCase();
       if (!needle) return [];
       const digits = needle.replace(/\D/g, "");
       const scored = this.d.participants
+        .filter((p) => {
+          if (!eventId) return true;
+          return this.d.registrations.some((r) => r.participantId === p.id && r.eventId === eventId && r.status !== "cancelled" && r.status !== "rejected");
+        })
         .map((p) => {
           const name = p.fullName.toLowerCase();
           const code = p.code.toLowerCase();
@@ -2476,6 +2488,16 @@ export class MockRepository implements Repository {
         eventId: input.eventId ?? null,
       });
       return { record: clone(rec), wasAlready: false };
+    },
+
+    undoCheckIn: async (id: string): Promise<void> => {
+      this.assertCan("attendance.checkin");
+      const idx = this.d.attendance.findIndex((a) => a.id === id);
+      if (idx === -1) throw new DataError("NOT_FOUND", "Attendance record not found");
+      const rec = this.d.attendance[idx];
+      this.d.attendance.splice(idx, 1);
+      this.remove("attendance", id);
+      this.log("attendance.undone", "attendance", id, rec as unknown as Record<string, unknown>, null, "Undo check-in");
     },
 
     noShows: async (eventId: string) => {

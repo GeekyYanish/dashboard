@@ -194,6 +194,7 @@ export function NeoSearchField({
   size = "md",
   autoFocus,
   onKeyDown,
+  disabled,
 }: {
   value: string;
   onValueChange: (v: string) => void;
@@ -202,6 +203,7 @@ export function NeoSearchField({
   size?: "md" | "lg";
   autoFocus?: boolean;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  disabled?: boolean;
 }) {
   return (
     <div
@@ -224,6 +226,7 @@ export function NeoSearchField({
         autoFocus={autoFocus}
         onChange={(e) => onValueChange(e.target.value)}
         onKeyDown={onKeyDown}
+        disabled={disabled}
         placeholder={placeholder}
         className={cn(
           "h-full w-full bg-transparent pr-10 text-ink outline-none placeholder:text-ink-faint",
@@ -634,7 +637,7 @@ export function NeoCombobox({
                   setOpen(false);
                 }}
               >
-                <span className="truncate">Add "{query}"</span>
+                <span className="truncate">Add &quot;{query}&quot;</span>
               </button>
             )}
           </div>

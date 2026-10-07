@@ -92,6 +92,10 @@ const recentCheckins = useMemo(() => {
       if (res.wasAlready) toast.info("Already checked in", `${name} — no duplicate recorded.`);
       else toast.success("Checked in", name);
       attendance.reload();
+      // The "N of M have arrived" bar comes from the event's stats, not from the
+      // attendance list, so it has to be refreshed too or it never moves.
+      eventStats.reload();
+      noShows.reload();
       setQuery("");
     } catch (e) {
       toast.error(isDataError(e) ? e.message : "Check-in failed");
@@ -104,6 +108,8 @@ const recentCheckins = useMemo(() => {
       await getRepo().attendance.undoCheckIn(id);
       toast.success("Marked absent", name);
       attendance.reload();
+      eventStats.reload();
+      noShows.reload();
     } catch (e) {
       toast.error(isDataError(e) ? e.message : "Undo failed");
     }

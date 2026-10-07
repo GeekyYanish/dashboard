@@ -1,4 +1,5 @@
 import type { Tone } from "./components/neo";
+import type { FestEvent } from "@/lib/data/types";
 
 /**
  * Status → tone, in one place.
@@ -93,6 +94,20 @@ export const EVENT_TONE: Record<string, Tone> = {
   completed: "neutral",
   cancelled: "failed",
 };
+
+/** Event statuses in lifecycle order, as an admin can set them. */
+export const EVENT_STATUS_OPTIONS: { value: FestEvent["status"]; label: string }[] = [
+  { value: "draft", label: "Draft" },
+  { value: "published", label: "Published" },
+  { value: "registration_closed", label: "Registration closed" },
+  { value: "ongoing", label: "Ongoing" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+export const EVENT_LABEL: Record<string, string> = Object.fromEntries(
+  EVENT_STATUS_OPTIONS.map((o) => [o.value, o.label]),
+);
 
 export const TRAVEL_TONE: Record<string, Tone> = {
   expected: "pending",

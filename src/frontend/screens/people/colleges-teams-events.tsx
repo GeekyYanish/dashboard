@@ -29,6 +29,8 @@ import {
   KeyValue,
   NeoDrawer,
   NeoSegmented,
+  NeoSelect,
+  NeoTooltip,
   SectionRule,
   toast,
   type Column,
@@ -40,7 +42,8 @@ import { useLookups } from "@/frontend/hooks/use-lookups";
 import { getRepo } from "@/lib/data";
 import { isDataError, type FestEvent, type Team } from "@/lib/data/types";
 import { TRACKS, inr } from "@/lib/fest.config";
-import { EVENT_TONE, titleCase } from "@/frontend/status";
+import { useCan } from "@/frontend/hooks/use-auth";
+import { EVENT_LABEL, EVENT_STATUS_OPTIONS, EVENT_TONE, titleCase } from "@/frontend/status";
 import { downloadCsv, downloadExcel, relativeTime } from "@/lib/utils";
 
 /* ==========================================================================
@@ -869,11 +872,32 @@ export function EventsScreen() {
   const stats = useAsync(() => getRepo().events.allStats(), []);
   const [track, setTrack] = useState<string>("all");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [savingStatus, setSavingStatus] = useState(false);
+  const { allowed: canManageEvents, reason: manageReason } = useCan("events.manage");
 
   const statMap = useMemo(
     () => new Map((stats.data ?? []).map((s) => [s.eventId, s])),
     [stats.data],
   );
+
+  async function changeStatus(ev: FestEvent, next: FestEvent["status"]) {
+    if (next === ev.status || savingStatus) return;
+    setSavingStatus(true);
+    try {
+      const updated = await getRepo().events.update(ev.id, { status: next });
+      // Trust what the server says it saved, not what was clicked.
+      events.reload();
+      if (updated.status === next) {
+        toast.success("Status updated", `${ev.title} is now ${EVENT_LABEL[next] ?? next}.`);
+      } else {
+        toast.error("Status not changed", "The server did not apply this change — try again.");
+      }
+    } catch (err) {
+      toast.error(isDataError(err) ? err.message : "Could not change the status");
+    } finally {
+      setSavingStatus(false);
+    }
+  }
 
   const rows = useMemo(() => {
     const d = events.data ?? [];
@@ -980,7 +1004,7 @@ export function EventsScreen() {
       sortValue: (e) => e.status,
       cell: (e) => (
         <StatusBadge tone={EVENT_TONE[e.status]} size="sm">
-          {titleCase(e.status)}
+          {EVENT_LABEL[e.status] ?? titleCase(e.status)}
         </StatusBadge>
       ),
     },
@@ -1129,21 +1153,6 @@ export function EventsScreen() {
             >
               Export
             </NeoButton>
-            <NeoButton
-              size="sm"
-              variant="secondary"
-              onClick={async () => {
-                const next =
-                  focused.status === "published" ? "registration_closed" : "published";
-                await getRepo().events.update(focused.id, { status: next });
-                toast.success(
-                  next === "published" ? "Registrations reopened" : "Registrations closed",
-                );
-                events.reload();
-              }}
-            >
-              {focused.status === "published" ? "Close registrations" : "Reopen registrations"}
-            </NeoButton>
             </div>
           ) : null
         }
@@ -1157,6 +1166,30 @@ export function EventsScreen() {
                 label="Revenue"
                 value={inr(focusedStats?.revenue ?? 0, { compact: true })}
               />
+            </div>
+            <div className="neo-inset-sm flex flex-wrap items-center justify-between gap-3 rounded-neo p-3.5">
+              <div>
+                <div className="text-[0.72rem] font-medium uppercase tracking-wide text-ink-muted">
+                  Event status
+                </div>
+                <StatusBadge tone={EVENT_TONE[focused.status]} size="sm">
+                  {EVENT_LABEL[focused.status] ?? titleCase(focused.status)}
+                </StatusBadge>
+              </div>
+              {canManageEvents ? (
+                <NeoSelect
+                  aria-label="Change event status"
+                  value={focused.status}
+                  disabled={savingStatus}
+                  className="w-auto"
+                  options={EVENT_STATUS_OPTIONS}
+                  onChange={(e) => changeStatus(focused, e.target.value as FestEvent["status"])}
+                />
+              ) : (
+                <NeoTooltip content={manageReason ?? "Not permitted for your role"}>
+                  <span className="text-[0.76rem] text-ink-faint">Only an admin can change this</span>
+                </NeoTooltip>
+              )}
             </div>
             <dl className="divide-y divide-hairline">
               <KeyValue label="Venue" value={focused.venue} />

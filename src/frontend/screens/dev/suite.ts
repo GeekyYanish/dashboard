@@ -670,6 +670,27 @@ export const SUITE: { group: string; name: string; fn: TestFn }[] = [
     },
   },
 
+  // ---- Event status -------------------------------------------------------
+  {
+    group: "Events",
+    name: "An event's status can be changed and the change sticks",
+    fn: async ({ assert, repo }) => {
+      const before = (await repo.events.list())[0];
+      assert(!!before, "seed has no events");
+      const was = before.status;
+      for (const next of ["completed", "cancelled", "published"] as const) {
+        const updated = await repo.events.update(before.id, { status: next });
+        assert(updated.status === next, `update returned ${updated.status}, wanted ${next}`);
+        const reread = await repo.events.get(before.id);
+        assert(reread?.status === next, `re-read gave ${reread?.status}, wanted ${next}`);
+      }
+      // Only that event changed, and nothing else about it.
+      const after = await repo.events.get(before.id);
+      assert(after?.title === before.title && after?.capacity === before.capacity, "an unrelated field changed");
+      await repo.events.update(before.id, { status: was });
+    },
+  },
+
   // ---- Money invariants ---------------------------------------------------
   {
     group: "Payments",

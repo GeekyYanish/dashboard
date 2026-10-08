@@ -64,9 +64,9 @@ export class HttpAuth implements AuthRepo {
   }
   onAuthStateChange(cb: (s: Session | null) => void) {
     this.listeners.add(cb);
-    // Only poll a visible tab: this runs independently of the shell's own
-    // refresh timer, so a backgrounded console otherwise kept re-validating its
-    // session forever for nobody's benefit.
+    // Only poll a visible tab: a backgrounded console otherwise kept
+    // re-validating its session forever for nobody's benefit. The backend
+    // answers this from its session cache, so it costs no database query.
     const timer = window.setInterval(() => {
       if (document.hidden) return;
       // Same rule as the initial load in useAuth: only a genuine auth failure

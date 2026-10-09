@@ -14,18 +14,78 @@ interface ApiErrorBody {
   error?: { code?: string; message?: string };
 }
 
+/* ── Freshness ───────────────────────────────────────────────────────────────
+ * The backend serves console reads from an in-memory cache and stamps every
+ * response with `X-Data-Version`, a number that moves forward whenever a write
+ * changes what the console shows. Pages never refetch on their own. Instead the
+ * shell compares the server's current version with the newest one this tab has
+ * loaded, and when the server is ahead it asks the operator to press Refresh.
+ */
+
+let loadedVersion: number | null = null;
+let freshUntil = 0;
+
+function readVersion(res: Response, header: string): number | null {
+  const value = Number(res.headers.get(header));
+  return res.headers.has(header) && Number.isFinite(value) ? value : null;
+}
+
+function trackVersion(method: string, res: Response) {
+  const version = readVersion(res, "x-data-version");
+  if (version === null) return;
+  if (method === "GET") {
+    loadedVersion = Math.max(loadedVersion ?? 0, version);
+    return;
+  }
+  // A write reports the version just before it too. When that matches what
+  // this tab already has, the operator's own save is the only change, so the
+  // tab is still current and must not be told otherwise.
+  const previous = readVersion(res, "x-data-version-prev");
+  if (previous !== null && loadedVersion !== null && previous <= loadedVersion) loadedVersion = version;
+}
+
+/**
+ * Called by the Refresh button. For the next few seconds every read skips the
+ * backend's cache and goes to the database, which covers the burst of requests
+ * the refresh fans out to every mounted view.
+ */
+export function requestFreshData() {
+  freshUntil = Date.now() + 5_000;
+}
+
+/**
+ * Whether the backend has data newer than what this tab has loaded. Served from
+ * the backend's memory, so checking costs no database query.
+ */
+export async function hasNewerData(): Promise<boolean> {
+  if (loadedVersion === null) return false;
+  try {
+    const res = await fetch("/api/v1/admin/data-version", { credentials: "same-origin", cache: "no-store" });
+    if (!res.ok) return false;
+    const { version } = (await res.json()) as { version?: number };
+    return typeof version === "number" && version > loadedVersion;
+  } catch {
+    return false;
+  }
+}
+
 async function request<T>(
   method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (method === "GET" && Date.now() < freshUntil) headers["X-Console-Fresh"] = "1";
+
   const res = await fetch(path, {
     method,
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: "same-origin",
     cache: "no-store",
   });
+  if (res.ok) trackVersion(method, res);
 
   if (res.status === 204) return undefined as T;
   const json = await res.json().catch(() => null);

@@ -14,11 +14,13 @@ import {
   CopyCheck,
   CalendarClock,
   ListOrdered,
+  Users,
 } from "lucide-react";
 import { Page, PageHeader, SubNav } from "@/frontend/components/page";
 import {
   NeoCard,
   NeoButton,
+  NeoModal,
   DataTable,
   StatusBadge,
   NeoAvatar,
@@ -39,7 +41,30 @@ import { REGISTRATION_LABEL, REGISTRATION_TONE, titleCase } from "@/frontend/sta
 import { downloadCsv, relativeTime } from "@/lib/utils";
 import { useAuth } from "@/frontend/hooks/use-auth";
 
+const mixed = (values: unknown[]) => new Set(values).size > 1;
+
+/** What a person owes across their live registrations; a single row is just its own fee. */
+const groupFee = (r: Row) =>
+  r.group.length === 1
+    ? r.feeInr
+    : r.group.filter((g) => g.status !== "cancelled" && g.status !== "rejected").reduce((sum, g) => sum + g.feeInr, 0);
+
+/** One table row: a registration, plus every registration of the same person when grouped. */
+type Row = Registration & { group: Registration[] };
+
 const STATUSES = ["pending", "confirmed", "waitlisted", "cancelled", "rejected"] as const;
+
+function resolveEventTrack(eventId: string, lookups: { event: (id: string) => { track?: string } | undefined | null }): string {
+  const ev = lookups.event(eventId);
+  if (ev?.track) return ev.track;
+  const id = (eventId || "").toLowerCase();
+  if (id.includes("design") || id.includes("art")) return "design";
+  if (id.includes("game") || id.includes("gaming") || id.includes("esport")) return "gaming";
+  if (id.includes("quiz") || id.includes("literary") || id.includes("debate") || id.includes("paper")) return "literary";
+  if (id.includes("dance") || id.includes("music") || id.includes("cultural") || id.includes("twin") || id.includes("quest")) return "cultural";
+  if (id.includes("sport")) return "sports";
+  return "technical";
+}
 
 export interface UserRegistrationRow {
   id: string;
@@ -83,6 +108,8 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
   const [busy, setBusy] = useState(false);
 
   const isUserMode = facetState.user ? facetState.user.includes("paid") : Boolean(initialUserMode);
+  const [groupByPerson, setGroupByPerson] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const filter = useMemo(
     () => ({
@@ -121,6 +148,51 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
     return m;
   }, [payments.data, all.data]);
 
+  /** Filtered rows for non-user mode (All registrations) since backend lacks some filters */
+  const displayRows = useMemo(() => {
+    if (isUserMode) return [];
+    let list = rows.data ?? [];
+
+    if (facetState.track?.length) {
+      list = list.filter((r) => {
+        const track = resolveEventTrack(r.eventId, lookups);
+        return facetState.track.includes(track);
+      });
+    }
+
+    if (facetState.category?.length) {
+      list = list.filter((r) => {
+        const p = lookups.participant(r.participantId);
+        const cat = p?.category || "participant";
+        return facetState.category.includes(cat);
+      });
+    }
+
+    return list;
+  }, [isUserMode, rows.data, facetState, lookups]);
+
+  /**
+   * Grouped, a person who registered for several events is a single row (the
+   * latest registration stands in for them) carrying all of their registrations.
+   * Ungrouped, every row is just its own registration.
+   */
+  const tableRows: Row[] = useMemo(() => {
+    const data = displayRows;
+    if (!groupByPerson) return data.map((r) => ({ ...r, group: [r] }));
+    const byPerson = new Map<string, Registration[]>();
+    for (const r of data) byPerson.set(r.participantId, [...(byPerson.get(r.participantId) ?? []), r]);
+    return [...byPerson.values()].map((group) => {
+      const latest = group.reduce((a, b) => (b.registeredAt > a.registeredAt ? b : a));
+      return { ...latest, group };
+    });
+  }, [displayRows, groupByPerson]);
+
+  /** Selection is by row; a grouped row stands for all of that person's registrations. */
+  const selectedIds = useMemo(
+    () => tableRows.filter((r) => selected.has(r.id)).flatMap((r) => r.group.map((g) => g.id)),
+    [tableRows, selected],
+  );
+
   /** Aggregated user rows: all participants who registered and completed payment */
   const userAggregatedRows = useMemo(() => {
     if (!all.data) return [];
@@ -156,13 +228,14 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
 
       const events = eventRegs.map((r) => {
         const ev = lookups.event(r.eventId);
-        const tr = ev?.track ? TRACKS.find((t) => t.id === ev.track) : undefined;
+        const trackId = ev?.track || resolveEventTrack(r.eventId, lookups);
+        const tr = TRACKS.find((t) => t.id === trackId);
         return {
           id: r.id,
           code: r.code,
           eventId: r.eventId,
           eventTitle: ev?.title ?? r.eventTitle ?? r.eventId,
-          track: tr?.label ?? ev?.track,
+          track: tr?.label ?? trackId,
           trackShort: tr?.short,
           teamId: r.teamId,
           status: r.status,
@@ -232,15 +305,23 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
     }
 
     if (facetState.track?.length) {
-      list = list.filter((u) =>
-        u.events.some((e) => facetState.track.includes(lookups.event(e.eventId)?.track ?? "")),
-      );
+      list = list
+        .filter((u) =>
+          u.events.some((e) => facetState.track.includes(resolveEventTrack(e.eventId, lookups))),
+        )
+        .map((u) => ({
+          ...u,
+          events: u.events.filter((e) =>
+            facetState.track.includes(resolveEventTrack(e.eventId, lookups)),
+          ),
+        }));
     }
 
     if (facetState.category?.length) {
       list = list.filter((u) => {
         const p = lookups.participant(u.participantId);
-        return p && facetState.category.includes(p.category);
+        const cat = p?.category || "participant";
+        return facetState.category.includes(cat);
       });
     }
 
@@ -318,14 +399,24 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
     [facetState, all.data, isUserMode, paidUsersCount, userAggregatedRows],
   );
 
-  const columns: Column<Registration>[] = useMemo(
+  const eventNames = useCallback(
+    (r: Row) =>
+      [...new Set(r.group.map((g) => lookups.event(g.eventId)?.title ?? g.eventTitle ?? "—"))].join(", "),
+    [lookups],
+  );
+
+  const columns: Column<Row>[] = useMemo(
     () => [
       {
         key: "code",
         header: "Reg ID",
         width: "104px",
         sortValue: (r) => r.code,
-        cell: (r) => <span className="font-mono text-[0.76rem] text-ink-muted">{r.code}</span>,
+        cell: (r) => (
+          <span className="font-mono text-[0.76rem] text-ink-muted">
+            {r.group.length > 1 ? `${r.group.length} registrations` : r.code}
+          </span>
+        ),
       },
       {
         key: "participant",
@@ -350,9 +441,17 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
       {
         key: "event",
         header: "Event",
-        sortValue: (r) => lookups.event(r.eventId)?.title ?? "",
+        sortValue: (r) => eventNames(r),
         cell: (r) => {
           const e = lookups.event(r.eventId);
+          if (r.group.length > 1) {
+            const names = eventNames(r);
+            return (
+              <div className="min-w-0 text-ink-soft" title={names}>
+                <div className="line-clamp-2 break-words">{names}</div>
+              </div>
+            );
+          }
           return (
             <div className="min-w-0">
               <div className="truncate text-ink-soft">{e?.title ?? "—"}</div>
@@ -368,20 +467,31 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
         key: "status",
         header: "Status",
         width: "128px",
-        sortValue: (r) => r.status,
-        cell: (r) => (
+        sortValue: (r) => (mixed(r.group.map((g) => g.status)) ? "mixed" : r.status),
+        cell: (r) =>
+          mixed(r.group.map((g) => g.status)) ? (
+            <StatusBadge tone="pending" size="sm">
+              Mixed
+            </StatusBadge>
+          ) : (
           <StatusBadge tone={REGISTRATION_TONE[r.status]} size="sm">
             {REGISTRATION_LABEL[r.status]}
             {r.status === "waitlisted" && r.waitlistPosition ? ` #${r.waitlistPosition}` : ""}
           </StatusBadge>
-        ),
+          ),
       },
       {
         key: "payment",
         header: "Payment",
         width: "126px",
-        sortValue: (r) => payByReg.get(r.id) ?? "zz-unpaid",
+        sortValue: (r) => (mixed(r.group.map((g) => payByReg.get(g.id))) ? "mixed" : (payByReg.get(r.id) ?? "zz-unpaid")),
         cell: (r) => {
+          if (mixed(r.group.map((g) => payByReg.get(g.id))))
+            return (
+              <StatusBadge tone="pending" size="sm">
+                Mixed
+              </StatusBadge>
+            );
           const st = payByReg.get(r.id);
           if (!st)
             return (
@@ -404,8 +514,8 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
         header: "Fee",
         width: "84px",
         align: "right",
-        sortValue: (r) => r.feeInr,
-        cell: (r) => <span className="tnum text-ink-soft">{inr(r.feeInr)}</span>,
+        sortValue: (r) => groupFee(r),
+        cell: (r) => <span className="tnum text-ink-soft">{inr(groupFee(r))}</span>,
       },
       {
         key: "registeredAt",
@@ -424,7 +534,7 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
         cell: (r) => <span className="text-[0.76rem] text-ink-muted">{titleCase(r.source)}</span>,
       },
     ],
-    [lookups, payByReg],
+    [lookups, payByReg, eventNames],
   );
 
   const userColumns: Column<UserRegistrationRow>[] = useMemo(
@@ -566,50 +676,76 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
     [rows, all],
   );
 
-  const exportCsv = async () => {
-    if (isUserMode) {
-      downloadCsv(`paid-users-registrations-${new Date().toISOString().slice(0, 10)}.csv`, [
-        [
-          "User Code",
-          "Name",
-          "Email",
-          "College",
-          "Department",
-          "Year",
-          "Registered Events",
-          "Events Count",
-          "Status",
-          "Payment",
-          "Fee",
-          "Registered At",
-        ],
-        ...userDisplayRows.map((u) => [
-          u.code,
-          u.participantName,
-          u.participantEmail,
-          u.collegeName ?? "",
-          u.department ?? "",
-          u.yearOfStudy ?? "",
-          u.events.map((e) => e.eventTitle).join("; "),
-          u.events.length,
-          REGISTRATION_LABEL[u.status] ?? u.status,
-          "Paid",
-          u.totalFeeInr,
-          u.registeredAt,
-        ]),
-      ]);
-      toast.success(`Exported ${userDisplayRows.length.toLocaleString("en-IN")} users`);
-      return;
-    }
-
+  const exportCsv = async (mode: "individual" | "grouped") => {
     const data = rows.data ?? [];
+    // Team names are not part of the shared lookups. Best effort: if the team
+    // list cannot be read for this role, the export falls back to the team id.
     const teamName = new Map<string, string>();
     try {
       for (const t of await getRepo().teams.list()) teamName.set(t.id, t.name);
     } catch {
       /* fall back to the id below */
     }
-    downloadCsv(`registrations-${new Date().toISOString().slice(0, 10)}.csv`, [
+    const stamp = new Date().toISOString().slice(0, 10);
+    const participantCells = (r: Registration) => {
+      const p = lookups.participant(r.participantId);
+      const c = lookups.collegeOf(r.participantId);
+      return [
+        p?.code ?? r.participantCode ?? "",
+        p?.fullName ?? r.participantName ?? "",
+        p?.email ?? r.participantEmail ?? "",
+        p?.phone ?? "",
+        p?.gender ?? "",
+        p?.dateOfBirth ?? "",
+        c?.name ?? "",
+        p?.department ?? "",
+        p?.yearOfStudy ?? "",
+        p?.category ?? "",
+        p?.tshirtSize ?? "",
+        p?.dietaryPref ?? "",
+        p ? `${p.emergencyName} ${p.emergencyPhone}` : "",
+      ];
+    };
+
+    if (mode === "grouped") {
+      // One row per person. Per-event columns (Event, Track, Status, Payment)
+      // list one entry per registration in the same order, comma-separated.
+      const byPerson = new Map<string, Registration[]>();
+      for (const r of data) byPerson.set(r.participantId, [...(byPerson.get(r.participantId) ?? []), r]);
+      const people = [...byPerson.values()];
+      const join = (group: Registration[], f: (r: Registration) => string) => group.map(f).join(", ");
+      downloadCsv(`registrations-by-person-${stamp}.csv`, [
+        [
+          "Events", "Registrations", "Reg IDs", "Tracks", "Statuses", "Payments", "Total fee",
+          "First registered",
+          "Participant code", "Name", "Email", "Phone", "Gender", "DOB", "College", "Department",
+          "Year", "Category", "T-shirt", "Diet", "Emergency",
+        ],
+        ...people.map((group) => {
+          const pay = (r: Registration) => {
+            const st = payByReg.get(r.id) ?? "unpaid";
+            return st === "verified" ? "Paid" : titleCase(st);
+          };
+          return [
+            join(group, (r) => lookups.event(r.eventId)?.title ?? r.eventTitle ?? ""),
+            group.length,
+            join(group, (r) => r.code),
+            join(group, (r) => lookups.event(r.eventId)?.track ?? ""),
+            join(group, (r) => REGISTRATION_LABEL[r.status] ?? r.status),
+            join(group, pay),
+            group
+              .filter((r) => r.status !== "cancelled" && r.status !== "rejected")
+              .reduce((sum, r) => sum + r.feeInr, 0),
+            group.map((r) => r.registeredAt).sort()[0],
+            ...participantCells(group[0]),
+          ];
+        }),
+      ]);
+      toast.success(`Exported ${people.length.toLocaleString("en-IN")} people`, `${data.length.toLocaleString("en-IN")} registrations`);
+      return;
+    }
+
+    downloadCsv(`registrations-${stamp}.csv`, [
       [
         // Registration
         "Reg ID", "Event", "Track", "Team", "Status", "Payment", "Fee", "Source",
@@ -670,7 +806,7 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
         }
         actions={
           <>
-            <NeoButton size="sm" variant="secondary" icon={<Download />} onClick={exportCsv}>
+            <NeoButton size="sm" variant="secondary" icon={<Download />} onClick={() => setExportOpen(true)}>
               Export
             </NeoButton>
             {canManageRegistrations ? (
@@ -722,9 +858,29 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
           });
           toast.info(`Applied view “${v.name}”`);
         }}
-        resultCount={isUserMode ? userDisplayRows.length : rows.data?.length}
+        resultCount={isUserMode ? userDisplayRows.length : displayRows.length}
         totalCount={isUserMode ? paidUsersCount : all.data?.length}
       />
+
+      <div className="flex items-center gap-2">
+        <NeoButton
+          size="sm"
+          variant={groupByPerson ? "primary" : "secondary"}
+          icon={<Users />}
+          aria-pressed={groupByPerson}
+          onClick={() => {
+            setGroupByPerson((g) => !g);
+            setSelected(new Set());
+          }}
+        >
+          Group by person
+        </NeoButton>
+        {groupByPerson ? (
+          <span className="text-[0.76rem] text-ink-muted">
+            {tableRows.length.toLocaleString("en-IN")} people · {(rows.data?.length ?? 0).toLocaleString("en-IN")} registrations
+          </span>
+        ) : null}
+      </div>
 
       <NeoCard>
         <NeoCard.Body flush>
@@ -748,7 +904,7 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
             />
           ) : (
             <DataTable
-              rows={rows.data ?? []}
+              rows={tableRows}
               columns={columns}
               rowKey={(r) => r.id}
               loading={rows.loading || lookups.loading}
@@ -779,8 +935,8 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
             loading={busy}
             onClick={() =>
               bulk(
-                () => getRepo().registrations.bulkSetStatus([...selected], "confirmed"),
-                `Confirmed ${selected.size} registrations`,
+                () => getRepo().registrations.bulkSetStatus(selectedIds, "confirmed"),
+                `Confirmed ${selectedIds.length} registrations`,
               )
             }
           >
@@ -793,8 +949,8 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
             loading={busy}
             onClick={() =>
               bulk(
-                () => getRepo().registrations.bulkSetStatus([...selected], "waitlisted"),
-                `Moved ${selected.size} to the waitlist`,
+                () => getRepo().registrations.bulkSetStatus(selectedIds, "waitlisted"),
+                `Moved ${selectedIds.length} to the waitlist`,
               )
             }
           >
@@ -820,8 +976,8 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
             loading={busy}
             onClick={() =>
               bulk(
-                () => getRepo().registrations.bulkSetStatus([...selected], "rejected", "bulk_reject"),
-                `Rejected ${selected.size} registrations`,
+                () => getRepo().registrations.bulkSetStatus(selectedIds, "rejected", "bulk_reject"),
+                `Rejected ${selectedIds.length} registrations`,
               )
             }
           >
@@ -834,14 +990,31 @@ export function RegistrationsScreen({ initialUserMode = false }: { initialUserMo
             loading={busy}
             onClick={() =>
               bulk(async () => {
-                for (const id of selected) await getRepo().registrations.cancel(id, "withdrawal");
-              }, `Cancelled ${selected.size} registrations — waitlisters promoted`)
+                for (const id of selectedIds) await getRepo().registrations.cancel(id, "withdrawal");
+              }, `Cancelled ${selectedIds.length} registrations — waitlisters promoted`)
             }
           >
             Cancel
           </NeoButton>
         </BulkBar>
       ) : null}
+
+      <NeoModal
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        title="Export registrations"
+        description={`${(rows.data?.length ?? 0).toLocaleString("en-IN")} registrations match the current filters.`}
+        size="sm"
+      >
+        <div className="grid gap-2.5">
+          <NeoButton variant="secondary" onClick={() => exportCsv("individual")}>
+            Individual events — one row per registration
+          </NeoButton>
+          <NeoButton variant="secondary" onClick={() => exportCsv("grouped")}>
+            Grouped — one row per person, events comma-separated
+          </NeoButton>
+        </div>
+      </NeoModal>
 
       <RegistrationDrawer
         registrationId={openId}

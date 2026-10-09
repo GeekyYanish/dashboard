@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- backend JSON is validated at the API boundary. */
 import { api } from "./api-client";
 import { selectedEventId } from "./scope";
-import type { AuthRepo, AuditRepo, OverviewRepo, ParticipantRepo, RegistrationRepo, PaymentRepo, EventRepo, TeamRepo, StaffRepo, AdminRepo, CollegeRepo, Actor, ImportPreview } from "../repository";
+import type { AuthRepo, AuditRepo, OverviewRepo, ParticipantRepo, RegistrationRepo, PaymentRepo, EventRepo, TeamRepo, StaffRepo, AdminRepo, CollegeRepo, AttendanceRepo, Actor, ImportPreview } from "../repository";
 import type { Session } from "../../auth/session";
-import type { AttentionItem, AuditEvent, Announcement, College, PassTier, EventStats, FestEvent, OverviewStats, Participant, ParticipantFlags, Payment, PaymentStatus, Registration, RegistrationStatus, StaffMember, SubstitutionRequest, Team } from "../types";
+import type { AttentionItem, AuditEvent, Announcement, Attendance, College, PassTier, EventStats, FestEvent, OverviewStats, Participant, ParticipantFlags, Payment, PaymentStatus, Registration, RegistrationStatus, StaffMember, SubstitutionRequest, Team } from "../types";
 import { DataError, isDataError } from "../types";
 import { type PaymentMethodId, type StaffRoleId } from "../../fest.config";
 
@@ -64,9 +64,9 @@ export class HttpAuth implements AuthRepo {
   }
   onAuthStateChange(cb: (s: Session | null) => void) {
     this.listeners.add(cb);
-    // Only poll a visible tab: this runs independently of the shell's own
-    // refresh timer, so a backgrounded console otherwise kept re-validating its
-    // session forever for nobody's benefit.
+    // Only poll a visible tab: a backgrounded console otherwise kept
+    // re-validating its session forever for nobody's benefit. The backend
+    // answers this from its session cache, so it costs no database query.
     const timer = window.setInterval(() => {
       if (document.hidden) return;
       // Same rule as the initial load in useAuth: only a genuine auth failure
@@ -103,19 +103,28 @@ function toParticipant(value: any): Participant {
     createdAt: iso(value.createdAt),
     createdVia: "online",
     isBlocked: Boolean(value.isBanned),
+    festAttendance: Boolean(value.festAttendance),
+    festCheckedInAt: value.festCheckedInAt ?? null,
   };
 }
 
+/**
+ * The backend returns the newest 500 accounts unless asked for more (its cap is
+ * 2,000). Every screen resolves "who is this participant?" from this one list,
+ * so a festival past 500 accounts rendered its oldest payers as "Unknown".
+ */
+const PARTICIPANT_PAGE = 2000;
+
 export class HttpParticipants implements ParticipantRepo {
   async list(filter: any = {}) {
-    const rows = await api.get<any[]>("/api/v1/admin/participants", { ...scopeQuery(), search: filter.search, collegeId: filter.collegeId, category: filter.category });
+    const rows = await api.get<any[]>("/api/v1/admin/participants", { ...scopeQuery(), ...(filter.eventId ? { eventId: filter.eventId } : {}), search: filter.search, collegeId: filter.collegeId, category: filter.category, limit: PARTICIPANT_PAGE });
     return rows.map(toParticipant).filter((participant) => !filter.gender || participant.gender === filter.gender);
   }
   async get(id: string) {
     try { const value = await api.get<any>(`/api/v1/admin/participants/${id}`, scopeQuery()); return value?.participant ? toParticipant(value.participant) : null; } catch (error) { if (isDataError(error) && error.code === "NOT_FOUND") return null; throw error; }
   }
   async getByCode(code: string) { return (await this.list({ search: code })).find((participant) => participant.code.toLowerCase() === code.toLowerCase()) ?? null; }
-  async search(q: string, limit = 50) { return (await this.list({ search: q })).slice(0, limit); }
+  async search(q: string, limit = 50, eventId?: string) { return (await this.list({ search: q, eventId })).slice(0, limit); }
   async flags(id: string): Promise<ParticipantFlags> {
     const participant = await this.get(id);
     // Payment listing is intentionally ADMIN-only. The scoped participant
@@ -243,6 +252,9 @@ function toPayment(value: any): Payment {
     reviewNote: value.reviewNote ?? null,
     deskShiftId: value.deskShiftId ?? null,
     fraudFlags: value.fraudFlags ?? [],
+    participantName: value.participantName ?? null,
+    participantEmail: value.participantEmail ?? null,
+    participantCode: value.participantCode ?? null,
   };
 }
 
@@ -264,7 +276,7 @@ export class HttpPayments implements PaymentRepo {
        `status` used to send only the first selected value — the backend accepts
        a comma-separated list, so picking more than one status quietly dropped
        every status after the first. */
-    const hasClientFilter = Boolean(filter.search) || Boolean(filter.flaggedOnly);
+    const hasClientFilter = Boolean(filter.search) || Boolean(filter.flaggedOnly) || Boolean(filter.amounts?.length) || Boolean(filter.wide);
     const result = await api.get<any>("/api/v1/admin/payments", {
       status: filter.status?.join(","),
       participantId: filter.participantId,
@@ -272,6 +284,7 @@ export class HttpPayments implements PaymentRepo {
     });
     let rows: any[] = result.items ?? [];
     if (filter.flaggedOnly) rows = rows.filter((row) => (row.fraudFlags ?? []).length > 0);
+    if (filter.amounts?.length) rows = rows.filter((row) => filter.amounts.includes(Number(row.amount ?? 0)));
     const q = typeof filter.search === "string" ? filter.search.trim().toLowerCase() : "";
     if (q) {
       rows = rows.filter((row) =>
@@ -339,8 +352,9 @@ export class HttpPayments implements PaymentRepo {
 }
 
 function toEvent(value: any): FestEvent {
-  const track = value.categorySlug?.includes("gaming") ? "gaming" : value.categorySlug?.includes("quiz") ? "literary" : value.categorySlug?.includes("design") ? "design" : value.categorySlug?.includes("culture") ? "cultural" : "technical";
-  return { id: value.id, slug: value.slug, title: value.title, track: track as any, minTeamSize: value.minTeamSize ?? 1, maxTeamSize: value.maxTeamSize ?? 1, capacity: value.capacity ?? null, feeInr: value.feeAmount ?? 0, venue: value.venue ?? "—", day: value.startsAt?.slice(0, 10) ?? "2026-10-08", startsAt: iso(value.startsAt), endsAt: iso(value.endsAt), registrationClosesAt: value.registrationClosesAt ? iso(value.registrationClosesAt) : value.endsAt, requiresIndemnity: false, status: value.status, coordinatorName: "—", coordinatorPhone: "—" };
+  const cat = String(value.categorySlug || "").toLowerCase();
+  const track = cat.includes("gaming") ? "gaming" : cat.includes("quiz") || cat.includes("literary") ? "literary" : cat.includes("design") ? "design" : cat.includes("culture") || cat.includes("cultural") || cat.includes("non") ? "cultural" : "technical";
+  return { id: value.id, slug: value.slug, title: value.title, track: track as any, minTeamSize: value.minTeamSize ?? 1, maxTeamSize: value.maxTeamSize ?? 1, capacity: value.capacity ?? null, feeInr: value.feeAmount ?? 0, venue: value.venue ?? "—", day: value.startsAt?.slice(0, 10) ?? "2026-10-08", startsAt: iso(value.startsAt), endsAt: iso(value.endsAt), registrationClosesAt: value.registrationClosesAt ? iso(value.registrationClosesAt) : iso(value.endsAt), requiresIndemnity: false, status: value.status, coordinatorName: "—", coordinatorPhone: "—" };
 }
 
 export class HttpEvents implements EventRepo {
@@ -371,7 +385,7 @@ export class HttpTeams implements TeamRepo {
 
 function emptyOverview(value: any): OverviewStats {
   const expected = (value.totalParticipants ?? 0) * (value.entryPassAmountInr ?? 250);
-  return { totalRegistrations: value.totalRegistrations ?? 0, confirmed: value.confirmedRegistrations ?? 0, pending: value.pendingRegistrations ?? 0, waitlisted: value.waitlistedRegistrations ?? 0, cancelled: value.cancelledRegistrations ?? 0, participants: value.totalParticipants ?? 0, paidParticipants: value.paidParticipants ?? null, collegesOnboarded: 0, revenueCollected: value.verifiedRevenueInr ?? 0, revenueExpected: expected, outstandingDues: Math.max(0, expected - (value.verifiedRevenueInr ?? 0)), verificationQueueDepth: value.pendingPayments ?? 0, oldestPendingHours: 0, accommodationRequested: 0, accommodationAllotted: 0, accommodationCapacity: 0, checkedInToday: 0, docsPending: 0, openTickets: 0, funnel: [{ stage: "Participants", count: value.totalParticipants ?? 0 }, { stage: "Registrations", count: value.totalRegistrations ?? 0 }, { stage: "Confirmed", count: value.confirmedRegistrations ?? 0 }], series: [], revenueByMethod: [], registrationsByTrack: [], topColleges: [] };
+  return { totalRegistrations: value.totalRegistrations ?? 0, confirmed: value.confirmedRegistrations ?? 0, pending: value.pendingRegistrations ?? 0, waitlisted: value.waitlistedRegistrations ?? 0, cancelled: value.cancelledRegistrations ?? 0, participants: value.totalParticipants ?? 0, paidParticipants: value.paidParticipants ?? null, collegesOnboarded: 0, revenueCollected: value.verifiedRevenueInr ?? 0, verifiedPayments: value.verifiedPayments ?? null, pendingRevenue: value.pendingRevenueInr ?? null, flaggedPayments: value.flaggedPayments ?? null, revenueExpected: expected, outstandingDues: Math.max(0, expected - (value.verifiedRevenueInr ?? 0)), verificationQueueDepth: value.pendingPayments ?? 0, oldestPendingHours: 0, accommodationRequested: 0, accommodationAllotted: 0, accommodationCapacity: 0, checkedInToday: 0, docsPending: 0, openTickets: 0, funnel: [{ stage: "Participants", count: value.totalParticipants ?? 0 }, { stage: "Registrations", count: value.totalRegistrations ?? 0 }, { stage: "Confirmed", count: value.confirmedRegistrations ?? 0 }], series: [], revenueByMethod: [], registrationsByTrack: [], topColleges: [] };
 }
 
 /**
@@ -388,7 +402,7 @@ function toAuditEvent(value: any): AuditEvent {
   return {
     id: value.id,
     actorId: value.actorId,
-    actorName: value.actorName ?? value.actorEmail ?? value.actorId,
+    actorName: value.actorName ?? value.actorEmail ?? value.actorId ?? "System",
     action: value.action,
     entity: value.targetType,
     entityId: value.targetId,
@@ -444,6 +458,50 @@ export class HttpOverview implements OverviewRepo {
   async activity(limit = 20): Promise<AuditEvent[]> { return new HttpAudit().list({ limit }); }
   async announcements(): Promise<Announcement[]> { return []; }
 }
+
+export class HttpAttendance implements AttendanceRepo {
+  async list(day?: string, eventId?: string): Promise<Attendance[]> {
+    const rows = await api.get<any[]>("/api/v1/admin/attendance");
+    return rows.map((row) => ({
+      id: row.id,
+      participantId: row.participantId,
+      eventId: row.eventId ?? null,
+      registrationId: row.registrationId ?? null,
+      method: row.method ?? "manual",
+      checkedInAt: row.checkedInAt,
+      scannedBy: row.scannedBy ?? null,
+      day: row.day
+    })).filter(a => (!day || a.day === day) && (!eventId || a.eventId === eventId));
+  }
+  async undoCheckIn(id: string) {
+    await api.delete(`/api/v1/admin/attendance/${id}`);
+  }
+  async checkIn(input: { participantId: string; eventId?: string | null; method?: "qr" | "manual" | "self" }) {
+    const res = await api.post<any>("/api/v1/admin/attendance/check-in", {
+      participantId: input.participantId,
+      eventId: input.eventId ?? null,
+      method: input.method ?? "manual",
+    });
+    return {
+      record: {
+        id: res.record.id,
+        participantId: res.record.participantId,
+        eventId: res.record.eventId ?? null,
+        registrationId: res.record.registrationId ?? null,
+        method: res.record.method ?? "manual",
+        checkedInAt: res.record.checkedInAt,
+        scannedBy: res.record.scannedBy ?? null,
+        day: res.record.day
+      },
+      wasAlready: res.wasAlready
+    };
+  }
+  async noShows(eventId: string) {
+    const rows = await api.get<any[]>(`/api/v1/admin/events/${eventId}/no-shows`);
+    return rows.map(r => toRegistration(r));
+  }
+}
+
 
 export class HttpStaff implements StaffRepo {
   async list() {

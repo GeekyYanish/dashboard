@@ -18,6 +18,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import {
+  NeoButton,
   NeoIconButton,
   NeoPopover,
   MenuItem,
@@ -154,9 +155,9 @@ export function Topbar({
         </NeoIconButton>
 
         {onReload ? (
-          <NeoIconButton label="Refresh data" size="sm" variant="ghost" onClick={onReload}>
-            <RotateCw />
-          </NeoIconButton>
+          <NeoButton size="sm" variant="ghost" icon={<RotateCw />} onClick={onReload}>
+            Refresh
+          </NeoButton>
         ) : null}
 
         <NeoPopover

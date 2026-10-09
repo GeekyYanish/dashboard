@@ -5,12 +5,14 @@ import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { CommandPalette } from "./command-palette";
 import { ShortcutsOverlay } from "./shortcuts-overlay";
+import { RotateCw } from "lucide-react";
 import { TooltipProvider } from "@/frontend/components/neo";
 import { useAsync, useMounted } from "@/frontend/hooks/use-async";
 import { useAuth } from "@/frontend/hooks/use-auth";
 import { getRepo } from "@/lib/data";
-import { NeoSkeleton } from "@/frontend/components/neo";
+import { NeoButton, NeoSkeleton } from "@/frontend/components/neo";
 import { selectedEventId, setSelectedEventId } from "@/lib/data/http/scope";
+import { hasNewerData, requestFreshData } from "@/lib/data/http/api-client";
 
 /**
  * The authenticated console frame. `/desk` and `/live` deliberately do NOT use
@@ -52,29 +54,38 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
     if (!current || !events.data.some((event) => event.id === current)) setSelectedEventId(events.data[0].id);
   }, [session, events.data]);
 
+  const [stale, setStale] = useState(false);
+
+  // The only way views refetch is the operator pressing Refresh, which reads
+  // past the backend's cache straight from the database.
   const refreshLiveData = () => {
+    requestFreshData();
+    setStale(false);
     stats.reload();
     announcements.reload();
     events.reload();
     window.dispatchEvent(new CustomEvent("aurora:reload"));
   };
 
+  // No polling and no automatic refetch: every open console used to reload all
+  // of its views every 15 seconds and on every focus, which kept the database
+  // busy for nobody's benefit. When the operator comes back to the tab, ask the
+  // backend (from memory, no query) whether anything changed, and if so offer
+  // a refresh rather than doing one.
   useEffect(() => {
-    // Skip the poll while the tab is hidden. Each tick fans out to every
-    // mounted useAsync, so a console left open in a background tab was issuing
-    // a burst of authenticated requests every 15 seconds indefinitely — every
-    // one of which re-derives the caller's roles against the writer database.
-    // The focus listener already refreshes the moment the operator returns.
-    const timer = window.setInterval(() => {
-      if (!document.hidden) refreshLiveData();
-    }, 15_000);
-    const onFocus = () => refreshLiveData();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
+    const check = () => {
+      if (document.hidden) return;
+      void hasNewerData().then((newer) => {
+        if (newer) setStale(true);
+      });
     };
-  }, [stats.reload, announcements.reload, events.reload]);
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, []);
 
   // Global shortcut layer. Everything here is inert while a text field has
   // focus — an operator typing "k" into a search box must not open a modal.
@@ -130,6 +141,8 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
             onReload={refreshLiveData}
           />
 
+          {stale ? <StaleDataBanner onRefresh={refreshLiveData} /> : null}
+
           <main className="min-w-0 flex-1 px-3 py-5 sm:px-5 lg:px-7">
             {mounted ? children : <ShellSkeleton />}
           </main>
@@ -147,6 +160,23 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
  * client-side. This holds the layout still while that happens rather than
  * letting the page jump.
  */
+/** Shown when the backend has newer data than this tab. Never refreshes by itself. */
+function StaleDataBanner({ onRefresh }: { onRefresh: () => void }) {
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline bg-pending-bg px-3 py-2 sm:px-5 lg:px-7"
+    >
+      <p className="min-w-0 flex-1 text-[0.8rem] font-medium text-pending">
+        Data has changed since this page loaded. Refresh to see the latest.
+      </p>
+      <NeoButton size="sm" variant="primary" icon={<RotateCw />} onClick={onRefresh}>
+        Refresh
+      </NeoButton>
+    </div>
+  );
+}
+
 function ShellSkeleton() {
   return (
     <div className="mx-auto max-w-[1560px] space-y-4">

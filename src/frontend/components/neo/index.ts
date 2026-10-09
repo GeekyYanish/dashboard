@@ -14,6 +14,7 @@ export {
   NeoInput,
   NeoTextarea,
   NeoSelect,
+  NeoCombobox,
   NeoSearchField,
   NeoToggle,
   NeoCheckbox,

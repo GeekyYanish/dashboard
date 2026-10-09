@@ -34,10 +34,9 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
     fnRef.current = fn;
   });
 
-  // The console shell broadcasts a refresh after its 15-second poll, when the
-  // tab regains focus, and when the selected event changes. Listening here
-  // keeps every mounted core view in the same live scope without duplicating
-  // timers in each screen.
+  // The console shell broadcasts a refresh when the operator presses Refresh,
+  // and when the selected event changes. Listening here keeps every mounted
+  // core view in the same scope without wiring the button into each screen.
   useEffect(() => {
     const refresh = () => setExternalNonce((value) => value + 1);
     window.addEventListener("aurora:reload", refresh);
@@ -49,10 +48,10 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
   }, []);
 
   // Background refreshes must not flip `loading`. Screens render skeletons off
-  // that flag, so the shell's 15-second poll used to blank every mounted view
-  // twice a minute — and anything the skeleton replaced was destroyed and
-  // rebuilt, which is fatal for embedded content like the receipt viewer (the
-  // PDF restarted its load every poll and never finished).
+  // that flag, so a shell-wide refresh would blank every mounted view — and
+  // anything the skeleton replaced was destroyed and rebuilt, which is fatal
+  // for embedded content like the receipt viewer (the PDF restarted its load
+  // every refresh and never finished).
   //
   // A deps change or an explicit reload() still shows the skeleton: those mean
   // the caller asked for genuinely different data.
